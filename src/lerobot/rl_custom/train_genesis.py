@@ -30,7 +30,11 @@ from lerobot.rl_custom.policies import ACTAsRLPolicy, RandomPolicy
 
 def parse_args():
     p = argparse.ArgumentParser(description="Roll out MovePiecesEnv with a simple policy.")
-    p.add_argument("--device", default="cuda", help="Device for policy / tensors.")
+    p.add_argument(
+        "--device",
+        default="auto",
+        help="Device for policy / tensors. Use 'auto' to prefer CUDA, then MPS, then CPU.",
+    )
     p.add_argument("--batch_size", type=int, default=1, help="Batch size for the env.")
     p.add_argument("--max_steps", type=int, default=300, help="Episode horizon.")
     p.add_argument("--steps", type=int, default=100, help="Total rollout steps to run.")
@@ -38,6 +42,17 @@ def parse_args():
     p.add_argument("--policy_path", type=Path, default=None, help="Optional ACT policy checkpoint.")
     p.add_argument("--piece_layout", type=Path, default=None, help="Optional JSON layout file for pieces.")
     return p.parse_args()
+
+
+def resolve_device(device_arg: str) -> str:
+    if device_arg != "auto":
+        return device_arg
+
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
 
 
 def make_policy(policy_path: Path | None, action_dim: int, device: str):
@@ -63,10 +78,11 @@ def configure_logging():
 def main():
     configure_logging()
     args = parse_args()
+    device = resolve_device(args.device)
 
     env = gym.make(
         "my_environment/MovePiecesEnv-v0",
-        device=args.device,
+        device=device,
         batch_size=args.batch_size,
         max_steps=args.max_steps,
         show_viewer=args.show_viewer,
@@ -77,8 +93,8 @@ def main():
 
     # Action dim comes from env.action_space
     action_dim = env.env.action_space.shape[-1]
-    policy = make_policy(args.policy_path, action_dim=action_dim, device=args.device)
-    policy.to(args.device)
+    policy = make_policy(args.policy_path, action_dim=action_dim, device=device)
+    policy.to(device)
     policy.eval()
 
     obs, _ = env.reset()
