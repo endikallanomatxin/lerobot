@@ -6,6 +6,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 import json
+import struct
 from typing import List
 
 import genesis as gs
@@ -139,6 +140,7 @@ class MovePiecesEnv(gym.Env):
                 layout_override = json.load(f)
 
         self.piece_specs = self._build_piece_specs(robot_path.parent, layout_override)
+        self._mesh_vertex_cache: dict[Path, list[tuple[float, float, float]]] = {}
         self.piece_entities = [
             self.scene.add_entity(
                 gs.morphs.Mesh(
@@ -190,6 +192,10 @@ class MovePiecesEnv(gym.Env):
             dtype=torch.float32,
             device=self.device,
         )
+        self.silhouette_height = 0.0012
+        self.silhouette_spacing = 0.004
+        self.silhouette_radius = 0.001
+        self.silhouette_polygons = self._prepare_silhouette_polygons()
         self.piece_target_pos = self._piece_target_pose[:, :3]
         self.piece_target_rotvec = self._quat_to_rotvec(self._piece_target_pose[:, 3:])
 
@@ -531,6 +537,8 @@ class MovePiecesEnv(gym.Env):
         if debug_envs <= 0:
             return
         self.scene.clear_debug_objects()
+        self._draw_silhouette_outlines(self.silhouette_polygons.get("initial", []), color=(0.9, 0.1, 0.1))
+        self._draw_silhouette_outlines(self.silhouette_polygons.get("target", []), color=(0.1, 0.35, 0.9))
         for env_idx in range(debug_envs):
             for spec in self.piece_specs:
                 self.scene.draw_debug_sphere(spec.initial.pos, radius=0.0075, color=spec.color)
@@ -540,6 +548,26 @@ class MovePiecesEnv(gym.Env):
                 grip = gripper_pos[robot_idx, env_idx].detach().cpu().tolist()
                 radius = 0.017 if robot_idx == 0 else 0.012
                 self.scene.draw_debug_sphere(grip, radius=radius, color=gripper_color)
+
+    def _draw_silhouette_outlines(self, loops: list[list[tuple[float, float, float]]], color: tuple[float, float, float]):
+        if self.scene is None:
+            return
+        for loop in loops:
+            if len(loop) < 2:
+                continue
+            num_points = len(loop)
+            for idx in range(num_points):
+                p0 = loop[idx]
+                p1 = loop[(idx + 1) % num_points]
+                dx = p1[0] - p0[0]
+                dy = p1[1] - p0[1]
+                dz = p1[2] - p0[2]
+                segment_len = math.sqrt(dx * dx + dy * dy + dz * dz)
+                steps = max(2, int(segment_len / self.silhouette_spacing))
+                for step in range(steps):
+                    t = step / (steps - 1)
+                    pos = (p0[0] + t * dx, p0[1] + t * dy, p0[2] + t * dz)
+                    self.scene.draw_debug_sphere(pos, radius=self.silhouette_radius, color=color)
 
     def _stack_dof_states(self, attribute: str) -> torch.Tensor:
         states = []
@@ -638,6 +666,136 @@ class MovePiecesEnv(gym.Env):
                 color=(0.98, 0.38, 0.00),
             )
         ]
+
+    def _prepare_silhouette_polygons(self) -> dict[str, list[list[tuple[float, float, float]]]]:
+        polygons: dict[str, list[list[tuple[float, float, float]]]] = {"initial": [], "target": []}
+        if not self.piece_specs:
+            return polygons
+
+        z = self.print_bed_top_z + self.silhouette_height
+        for spec in self.piece_specs:
+            vertices = self._get_mesh_vertices(spec.mesh_file)
+            if not vertices:
+                continue
+            polygons["initial"].append(
+                self._build_pose_footprint(vertices, spec.initial.pos, spec.initial.quat, spec.scale, z)
+            )
+            polygons["target"].append(
+                self._build_pose_footprint(vertices, spec.target.pos, spec.target.quat, spec.scale, z)
+            )
+        return polygons
+
+    def _get_mesh_vertices(self, mesh_path: Path) -> list[tuple[float, float, float]]:
+        if mesh_path in self._mesh_vertex_cache:
+            return self._mesh_vertex_cache[mesh_path]
+        stl_path = mesh_path.with_suffix(".stl")
+        if not stl_path.exists():
+            gs.logger.warning(f"Could not find STL footprint for {mesh_path.name} (expected {stl_path.name})")
+            self._mesh_vertex_cache[mesh_path] = []
+            return []
+
+        try:
+            vertices = self._read_stl_vertices(stl_path)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            gs.logger.warning(f"Failed to build footprint for {mesh_path.name}: {exc}")
+            vertices = []
+
+        self._mesh_vertex_cache[mesh_path] = vertices
+        return vertices
+
+    @staticmethod
+    def _read_stl_vertices(stl_path: Path) -> list[tuple[float, float, float]]:
+        data = stl_path.read_bytes()
+        if len(data) < 84:
+            raise ValueError(f"STL file {stl_path} too small")
+        tri_count = struct.unpack("<I", data[80:84])[0]
+        expected_size = 84 + tri_count * 50
+        if len(data) != expected_size:
+            # fall back to a minimal ASCII STL reader
+            text = data.decode(errors="ignore")
+            vertices: list[tuple[float, float, float]] = []
+            for line in text.splitlines():
+                line = line.strip()
+                if line.startswith("vertex"):
+                    _, x, y, z = line.split()
+                    vertices.append((float(x), float(y), float(z)))
+            if not vertices:
+                raise ValueError(f"Unrecognized STL format for {stl_path}")
+            return vertices
+
+        vertices = []
+        offset = 84
+        for _ in range(tri_count):
+            offset += 12  # skip normal
+            for _ in range(3):
+                vertices.append(struct.unpack("<fff", data[offset : offset + 12]))
+                offset += 12
+            offset += 2  # attribute byte count
+        return vertices
+
+    @staticmethod
+    def _convex_hull_2d(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        if len(points) <= 1:
+            return points
+        points = sorted(set(points))
+
+        def cross(o, a, b):
+            return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+        lower: list[tuple[float, float]] = []
+        for p in points:
+            while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
+                lower.pop()
+            lower.append(p)
+
+        upper: list[tuple[float, float]] = []
+        for p in reversed(points):
+            while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
+                upper.pop()
+            upper.append(p)
+
+        return lower[:-1] + upper[:-1]
+
+    @staticmethod
+    def _quat_to_matrix(quat: tuple[float, float, float, float]) -> list[list[float]]:
+        w, x, y, z = quat
+        xx, yy, zz = x * x, y * y, z * z
+        xy, xz, yz = x * y, x * z, y * z
+        wx, wy, wz = w * x, w * y, w * z
+        return [
+            [1 - 2 * (yy + zz), 2 * (xy - wz), 2 * (xz + wy)],
+            [2 * (xy + wz), 1 - 2 * (xx + zz), 2 * (yz - wx)],
+            [2 * (xz - wy), 2 * (yz + wx), 1 - 2 * (xx + yy)],
+        ]
+
+    def _rotate_point(self, mat: list[list[float]], pt: tuple[float, float, float]) -> tuple[float, float, float]:
+        x, y, z = pt
+        return (
+            mat[0][0] * x + mat[0][1] * y + mat[0][2] * z,
+            mat[1][0] * x + mat[1][1] * y + mat[1][2] * z,
+            mat[2][0] * x + mat[2][1] * y + mat[2][2] * z,
+        )
+
+    def _build_pose_footprint(
+        self,
+        vertices: list[tuple[float, float, float]],
+        pos: tuple[float, float, float],
+        quat: tuple[float, float, float, float],
+        scale: float,
+        z_level: float,
+    ) -> list[tuple[float, float, float]]:
+        if not vertices:
+            return []
+        rot = self._quat_to_matrix(quat)
+        projected: list[tuple[float, float]] = []
+        for x, y, z in vertices:
+            scaled = (x * scale, y * scale, z * scale)
+            rx, ry, rz = self._rotate_point(rot, scaled)
+            wx = pos[0] + rx
+            wy = pos[1] + ry
+            projected.append((wx, wy))
+        hull = self._convex_hull_2d(projected)
+        return [(x, y, z_level) for x, y in hull]
 
     def _reset_pieces(self):
         if not self.piece_entities:
