@@ -52,6 +52,7 @@ class MovePiecesEnv(gym.Env):
         batch_size,
         max_steps,
         show_viewer: bool = False,
+        show_cameras: bool = False,
         record: bool = False,
         camera_setups: dict | None = None,
         piece_layout: list[dict] | None = None,
@@ -75,7 +76,7 @@ class MovePiecesEnv(gym.Env):
                 show_world_frame=True,
                 world_frame_size=1.0,
                 show_link_frame=False,
-                show_cameras=False,
+                show_cameras=show_cameras,
                 plane_reflection=True,
                 ambient_light=(0.1, 0.1, 0.1),
                 n_rendered_envs=min(4, batch_size),
@@ -93,7 +94,7 @@ class MovePiecesEnv(gym.Env):
         }
         cam_cfg = default_cam_setups if camera_setups is None else camera_setups
         self.cameras = {
-            name: self.scene.add_camera(res=tuple(cfg["res"]), pos=cfg["pos"], lookat=cfg["lookat"], fov=cfg["fov"], GUI=False)
+            name: self.scene.add_camera(res=tuple(cfg["res"]), pos=cfg["pos"], lookat=cfg["lookat"], fov=cfg["fov"], GUI=show_cameras)
             for name, cfg in cam_cfg.items()
         }
 
