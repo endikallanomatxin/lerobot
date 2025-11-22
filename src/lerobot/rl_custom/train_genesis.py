@@ -36,6 +36,7 @@ def parse_args():
     p.add_argument("--steps", type=int, default=100, help="Total rollout steps to run.")
     p.add_argument("--show_viewer", action="store_true", help="Enable Genesis viewer.")
     p.add_argument("--policy_path", type=Path, default=None, help="Optional ACT policy checkpoint.")
+    p.add_argument("--piece_layout", type=Path, default=None, help="Optional JSON layout file for pieces.")
     return p.parse_args()
 
 
@@ -70,6 +71,7 @@ def main():
         max_steps=args.max_steps,
         show_viewer=args.show_viewer,
         disable_env_checker=True,  # mixed obs/action dicts; we validate manually
+        piece_layout_file=args.piece_layout,
     )
     env = LeRobotGymEnvWrapper(env)
 

@@ -5,6 +5,7 @@ import math
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
+import json
 from typing import List
 
 import genesis as gs
@@ -53,6 +54,8 @@ class MovePiecesEnv(gym.Env):
         show_viewer: bool = False,
         record: bool = False,
         camera_setups: dict | None = None,
+        piece_layout: list[dict] | None = None,
+        piece_layout_file: str | Path | None = None,
     ):
         self.device = torch.device(device)
         self.batch_size = batch_size
@@ -125,7 +128,13 @@ class MovePiecesEnv(gym.Env):
             for config in self.robot_base_configs
         ]
         self.num_robots = len(self.robots)
-        self.piece_specs = self._build_piece_specs(robot_path.parent)
+
+        layout_override = piece_layout
+        if layout_override is None and piece_layout_file is not None:
+            with open(piece_layout_file, "r") as f:
+                layout_override = json.load(f)
+
+        self.piece_specs = self._build_piece_specs(robot_path.parent, layout_override)
         self.piece_entities = [
             self.scene.add_entity(
                 gs.morphs.Mesh(
@@ -563,8 +572,25 @@ class MovePiecesEnv(gym.Env):
             raise ValueError(f"Missing joint limits for: {missing}")
         return limits
 
-    def _build_piece_specs(self, so101_dir: Path) -> List[PieceSpec]:
+    def _build_piece_specs(self, so101_dir: Path, layout_override: list[dict] | None = None) -> List[PieceSpec]:
         assets_dir = so101_dir / "assets"
+        if layout_override:
+            colors = self._generate_pair_colors(max(len(layout_override), 1))
+            specs: list[PieceSpec] = []
+            for idx, entry in enumerate(layout_override):
+                name = entry.get("name", f"piece_{idx}")
+                mesh_path = Path(entry["mesh_file"])
+                if not mesh_path.is_absolute():
+                    mesh_path = assets_dir / mesh_path
+                init = entry["initial"]
+                tgt = entry["target"]
+                initial = PiecePose(pos=tuple(init["pos"]), quat=tuple(init.get("quat", (1.0, 0.0, 0.0, 0.0))))
+                target = PiecePose(pos=tuple(tgt["pos"]), quat=tuple(tgt.get("quat", (1.0, 0.0, 0.0, 0.0))))
+                color = tuple(entry.get("color", colors[idx % len(colors)]))
+                scale = float(entry.get("scale", 1.0))
+                specs.append(PieceSpec(name=name, mesh_file=mesh_path, initial=initial, target=target, color=color, scale=scale))
+            return specs
+
         resting_z = self.print_bed_top_z + 0.01
         target_z = self.print_bed_top_z + 0.02
         target_y = 0.30
