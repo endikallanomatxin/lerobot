@@ -29,14 +29,10 @@ El entorno usa génesis para simulación.
 WARNING:genesis:max_collision_pairs 300 is smaller than the theoretical maximal possible pairs 494, it uses less memory but might lead to missing some collision pairs if there are too many collision pairs
 ```
 
-# ENTRENAIENTO
 
-- Generar un dataset mayor grabando más ejemplos con las cámaras "arregladas"
-
-- Unificar los datasets
-
-- Entrenar el modelo de entrenamiento supervisado con este dataset mergeado
+# ENTRENAMIENTO
 
 - Añadir modelo de difusión
 
-- Fine tune del RL
+- Probar a ver si el RL ayuda
+
