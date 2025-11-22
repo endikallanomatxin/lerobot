@@ -146,7 +146,10 @@ class MovePiecesEnv(gym.Env):
                     fixed=False,
                     collision=True,
                     visualization=True,
-                    convexify=False,
+                    convexify=False,              # no global convex hull
+                    decompose_nonconvex=True,     # split into convex parts to avoid interpenetration
+                    decompose_object_error_threshold=0.02,  # tighter fit; lower keeps shape, higher is coarser
+                    merge_submeshes_for_collision=False,    # preserve per-part collision detail
                     parse_glb_with_trimesh=True,  # load GLB colors/materials
                     group_by_material=False,      # preserve per-vertex/per-face colors from GLB
                 )
@@ -595,13 +598,15 @@ class MovePiecesEnv(gym.Env):
                 specs.append(PieceSpec(name=name, mesh_file=mesh_path, initial=initial, target=target, color=color, scale=scale))
             return specs
 
-        resting_z = self.print_bed_top_z + 0.03
+        resting_z = self.print_bed_top_z + 0.06
         target_z = self.print_bed_top_z + 0.02
         target_y = 0.30
         identity = (1.0, 0.0, 0.0, 0.0)
         rot_z_90 = (math.sqrt(0.5), 0.0, 0.0, math.sqrt(0.5))
         rot_z_180 = (0.0, 0.0, 0.0, 1.0)
         rot_y_180 = (0.0, 0.0, 1.0, 0.0)
+        rot_y_90  = (math.sqrt(0.5), 0.0, math.sqrt(0.5), 0.0)
+        moving_jaw_resting_z = resting_z + 0.02
         return [
             PieceSpec(
                 name="motor_holder_so101_base_v1",
@@ -613,7 +618,7 @@ class MovePiecesEnv(gym.Env):
             PieceSpec(
                 name="moving_jaw_so101_v1",
                 mesh_file=assets_dir / "moving_jaw_so101_v1.glb",
-                initial=PiecePose(pos=(0.08, -0.1, resting_z), quat=identity),
+                initial=PiecePose(pos=(0.08, -0.1, moving_jaw_resting_z), quat=rot_y_90),
                 target=PiecePose(pos=(0.15, target_y - 0.05, target_z), quat=identity),
                 color=(0.98, 0.38, 0.00),
             ),
