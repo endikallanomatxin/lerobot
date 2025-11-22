@@ -21,6 +21,7 @@ from pathlib import Path
 import gymnasium as gym
 import torch
 import logging
+import warnings
 
 from lerobot.rl_custom.envs import LeRobotGymEnvWrapper
 from lerobot.rl_custom.envs import movepieces  # registers my_environment/MovePiecesEnv-v0
@@ -50,6 +51,12 @@ def configure_logging():
     gen_logger.propagate = False
     gen_logger.handlers.clear()
     gen_logger.setLevel(logging.WARNING)
+    # Suppress torchvision video deprecation warnings (not relevant for this harness).
+    warnings.filterwarnings(
+        "ignore",
+        message="The video decoding and encoding capabilities of torchvision are deprecated",
+        module="torchvision.io._video_deprecation_warning",
+    )
 
 
 def main():

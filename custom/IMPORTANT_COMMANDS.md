@@ -54,11 +54,11 @@ lerobot-record \
   --teleop.right_arm_port=$LEADER_RIGHT_PORT \
   --teleop.id=bimanual_leader \
   --display_data=true \
-  --dataset.repo_id=local/bimanual-so101-demo-27 \
-  --dataset.num_episodes=2 \
-  --dataset.episode_time_s=25 \
-  --dataset.reset_time_s=10 \
-  --dataset.single_task="Tarea bimanual X" \
+  --dataset.repo_id=local/3d_printed_pieces \
+  --dataset.num_episodes=10 \
+  --dataset.episode_time_s=60 \
+  --dataset.reset_time_s=5 \
+  --dataset.single_task="Pick up the orange 3D printed pieces and put the into their respective silhouttes" \
   --dataset.push_to_hub=False
 ```
 
@@ -87,7 +87,7 @@ lerobot-train \
 ```sh
 python -m lerobot.rl_custom.train_genesis \
     --device cuda \
-    --batch_size 1 \
+    --batch_size 16 \
     --max_steps 300 \
     --steps 200 \
     --policy_path outputs/train/act_bimanual-so101-demo-30/checkpoints/002000/pretrained_model/

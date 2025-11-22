@@ -16,14 +16,11 @@ El entorno usa génesis para simulación.
 
 ## TODO
 
-- Arreglar el warning que salta al entrenar:
-
-```
-warnings.warn(
-/home/mikel/Documents/lerobot/.venv/lib/python3.12/site-packages/torchvision/io/_video_deprecation_warning.py:9: UserWarning: The video decoding and encoding capabilities of torchvision are deprecated from version 0.22 and will be removed in version 0.24. W
-```
-
 - Poner las piezas del entorno en su sitio (pos y rot) (inicio, como en la cama de impresión y target, como alrededor de un espacio de trabajo)
+
+- En simulación y en realidad marcar siluetas de las piezas para facilitar el posicionamiento.
+
+- Aleatorizar un poco la simulación
 
 - Optimizar colisiones (que no todo compruebe si choca con todo)
 
