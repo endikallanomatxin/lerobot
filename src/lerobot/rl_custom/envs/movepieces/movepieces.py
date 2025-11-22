@@ -97,9 +97,10 @@ class MovePiecesEnv(gym.Env):
             for name, cfg in cam_cfg.items()
         }
 
-        self.plane = self.scene.add_entity(gs.morphs.Plane())
-        self.print_bed_size = (0.70, 0.45, 0.02)
-        self.print_bed_center = (0.0, -0.30, self.print_bed_size[2] / 2.0)
+        # self.plane = self.scene.add_entity(gs.morphs.Plane())
+        # Table spans 0.8 m along x (between robots) and sits flush with the ground (top at z=0).
+        self.print_bed_size = (0.80, 1.45, 0.02)
+        self.print_bed_center = (0.0, 0.0, -self.print_bed_size[2])
         self.print_bed_top_z = self.print_bed_center[2] + self.print_bed_size[2] / 2.0
         self.print_bed = self.scene.add_entity(
             gs.morphs.Box(
@@ -112,8 +113,8 @@ class MovePiecesEnv(gym.Env):
         )
 
         self.robot_base_configs = [
-            {"pos": (0.25, 0.0, 0.0), "quat": (0.0, 0.0, 0.0, 1.0)},
-            {"pos": (-0.25, 0.0, 0.0), "quat": (1.0, 0.0, 0.0, 0.0)},
+            {"pos": (0.37, 0.0, 0.0), "quat": (0.0, 0.0, 0.0, 1.0)},
+            {"pos": (-0.37, 0.0, 0.0), "quat": (1.0, 0.0, 0.0, 0.0)},
         ]
         self.sides = ["left", "right"]
         self.side_to_robot_idx = {"left": 0, "right": 1}
