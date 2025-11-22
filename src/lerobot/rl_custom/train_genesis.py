@@ -20,6 +20,7 @@ from pathlib import Path
 
 import gymnasium as gym
 import torch
+import logging
 
 from lerobot.rl_custom.envs import LeRobotGymEnvWrapper
 from lerobot.rl_custom.envs import movepieces  # registers my_environment/MovePiecesEnv-v0
@@ -43,7 +44,16 @@ def make_policy(policy_path: Path | None, action_dim: int, device: str):
     return ACTAsRLPolicy(policy_path=str(policy_path), device=device)
 
 
+def configure_logging():
+    # Genesis mirrors logs to the Python logger; disable propagation to avoid double-printing.
+    gen_logger = logging.getLogger("genesis")
+    gen_logger.propagate = False
+    gen_logger.handlers.clear()
+    gen_logger.setLevel(logging.WARNING)
+
+
 def main():
+    configure_logging()
     args = parse_args()
 
     env = gym.make(

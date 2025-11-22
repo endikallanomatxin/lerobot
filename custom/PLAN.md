@@ -23,8 +23,6 @@ warnings.warn(
 /home/mikel/Documents/lerobot/.venv/lib/python3.12/site-packages/torchvision/io/_video_deprecation_warning.py:9: UserWarning: The video decoding and encoding capabilities of torchvision are deprecated from version 0.22 and will be removed in version 0.24. W
 ```
 
-- Arreglar el logging de genesis que parece estar roto porque sale dos veces, la segunda mal.
-
 - Poner las piezas del entorno en su sitio (pos y rot) (inicio, como en la cama de impresión y target, como alrededor de un espacio de trabajo)
 
 - Optimizar colisiones (que no todo compruebe si choca con todo)
