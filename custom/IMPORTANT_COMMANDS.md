@@ -86,7 +86,6 @@ lerobot-train \
 
 ```sh
 python -m lerobot.rl_custom.train_genesis \
-    --device cuda \
     --batch_size 16 \
     --max_steps 300 \
     --steps 200 \
