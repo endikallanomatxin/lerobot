@@ -1,6 +1,7 @@
 import gymnasium as gym
 import numpy as np
 import torch
+import einops
 
 
 class LeRobotGymEnvWrapper:
@@ -41,5 +42,37 @@ class LeRobotGymEnvWrapper:
     @staticmethod
     def _to_obs_dict(obs):
         if isinstance(obs, dict):
-            return {k: torch.as_tensor(v, dtype=torch.float32) for k, v in obs.items()}
+            out = {}
+            for k, v in obs.items():
+                if isinstance(v, dict):
+                    if k == "pixels":
+                        # Convert camera images to torch BCHW float32 in [0,1], with keys observation.images.*
+                        for cam, img in v.items():
+                            if isinstance(img, torch.Tensor):
+                                img_t = img
+                            else:
+                                img_np = np.array(img, copy=True)
+                                img_t = torch.as_tensor(img_np)
+                            if img_t.ndim == 3:  # HWC
+                                img_t = img_t.unsqueeze(0)
+                            if img_t.shape[-1] == 4:  # drop alpha if present
+                                img_t = img_t[..., :3]
+                            # Convert to BCHW float in [0,1]
+                            img_t = einops.rearrange(img_t, "b h w c -> b c h w").contiguous()
+                            img_t = img_t.to(dtype=torch.float32) / 255.0
+                            out[f"observation.images.{cam}"] = img_t
+                    else:
+                        out[k] = {cam: torch.as_tensor(img) if torch.is_tensor(img) else img for cam, img in v.items()}
+                else:
+                    out[k] = torch.as_tensor(v, dtype=torch.float32)
+            if "environment_state" in out:
+                out.setdefault("observation.environment_state", out["environment_state"])
+            # If joint keys are present, stack them into observation.state in the env's action order.
+            joint_tensors = []
+            for key in obs.keys():
+                if key.endswith(".pos") and not key.startswith("observation."):
+                    joint_tensors.append(torch.as_tensor(obs[key], dtype=torch.float32))
+            if joint_tensors:
+                out["observation.state"] = torch.stack(joint_tensors, dim=1)
+            return out
         return {"observation": torch.as_tensor(obs, dtype=torch.float32)}

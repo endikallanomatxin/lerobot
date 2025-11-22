@@ -1,10 +1,16 @@
 # Important commands for running bimanual SO101 experiments
 
+
+## Configuración de los motores
+
 ```sh
 lerobot-setup-motors \
   --teleop.type=so101_leader \
   --teleop.port=/dev/ttyACM3
 ```
+
+
+## Calibración de los robots
 
 ```sh
 export FOLLOWER_LEFT_PORT="/dev/ttyACM0"
@@ -28,6 +34,9 @@ lerobot-calibrate \
   --teleop.right_arm_port=$LEADER_RIGHT_PORT \
   --teleop.id=bimanual_leader
 ```
+
+
+## Grabación de dataset
 
 ```sh
 lerobot-record \
@@ -53,12 +62,8 @@ lerobot-record \
   --dataset.push_to_hub=False
 ```
 
-```sh
-python -m lerobot.rl_custom.train_genesis --device cuda --batch_size 16 --max_steps 300 --steps 400
-```
 
-
-Entrenamiento supervisado:
+## Entrenamiento supervisado
 
 ```sh
 lerobot-train \
@@ -77,4 +82,16 @@ lerobot-train \
 ```
 
 
+## Entrenamiento por RL en entorno custom con Genesis
+
+```sh
+python -m lerobot.rl_custom.train_genesis \
+    --device cuda \
+    --batch_size 1 \
+    --max_steps 300 \
+    --steps 200 \
+    --policy_path outputs/train/act_bimanual-so101-demo-30/checkpoints/002000/pretrained_model/
+```
+
+(Si omites la policy_path, se entrena desde cero)
 

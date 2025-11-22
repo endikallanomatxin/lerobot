@@ -52,6 +52,7 @@ class MovePiecesEnv(gym.Env):
         max_steps,
         show_viewer: bool = False,
         record: bool = False,
+        camera_setups: dict | None = None,
     ):
         self.device = torch.device(device)
         self.batch_size = batch_size
@@ -81,14 +82,17 @@ class MovePiecesEnv(gym.Env):
             show_viewer=show_viewer,
         )
 
-        if self.record:
-            self.cam = self.scene.add_camera(
-                res=(1920, 1080),
-                pos=(2, 2, 1.5),
-                lookat=(0, 0, 0.5),
-                fov=40,
-                GUI=False,
-            )
+        # Camera setups (roughly aligned with wrist/overhead vantage points).
+        default_cam_setups = {
+            "left_wrist": {"res": (640, 480), "pos": (-0.35, -0.05, 0.25), "lookat": (0.0, -0.10, 0.05), "fov": 70},
+            "right_wrist": {"res": (640, 480), "pos": (0.35, -0.05, 0.25), "lookat": (0.0, -0.10, 0.05), "fov": 70},
+            "overhead": {"res": (640, 480), "pos": (0.0, -0.10, 0.75), "lookat": (0.0, -0.10, 0.05), "fov": 60},
+        }
+        cam_cfg = default_cam_setups if camera_setups is None else camera_setups
+        self.cameras = {
+            name: self.scene.add_camera(res=tuple(cfg["res"]), pos=cfg["pos"], lookat=cfg["lookat"], fov=cfg["fov"], GUI=False)
+            for name, cfg in cam_cfg.items()
+        }
 
         self.plane = self.scene.add_entity(gs.morphs.Plane())
         self.print_bed_size = (0.70, 0.45, 0.02)
@@ -302,6 +306,26 @@ class MovePiecesEnv(gym.Env):
                     val = torch.clamp((ang - mid) / half, -1.0, 1.0) * 100.0
                 obs_dict[f"{side}_{joint}.pos"] = val.detach().cpu().numpy().astype(np.float32)
 
+        if self.cameras:
+            pixels = {}
+            for name, cam in self.cameras.items():
+                try:
+                    img = cam.render(env_idx=0)
+                except TypeError:
+                    img = cam.render()
+                if isinstance(img, (list, tuple)):
+                    img = img[0]
+                if isinstance(img, torch.Tensor):
+                    img_np = img.detach().cpu().numpy()
+                else:
+                    img_np = np.asarray(img)
+                if img_np.ndim == 4:
+                    img_np = img_np[0]
+                if img_np.dtype != np.uint8:
+                    img_np = np.clip(img_np, 0, 255).astype(np.uint8)
+                pixels[name] = img_np
+            obs_dict["pixels"] = pixels
+
         return obs_dict
 
     def compute_reward(self):
@@ -454,13 +478,16 @@ class MovePiecesEnv(gym.Env):
             "success": terminated,
             "is_success": terminated,
         }
-        return (
-            {k: v if isinstance(v, np.ndarray) else v.detach().cpu().numpy() for k, v in obs.items()},
-            float(torch.mean(reward).item()),
-            terminated,
-            truncated,
-            info,
-        )
+        obs_np = {}
+        for k, v in obs.items():
+            if isinstance(v, dict):
+                obs_np[k] = v
+            elif isinstance(v, np.ndarray):
+                obs_np[k] = v
+            else:
+                obs_np[k] = v.detach().cpu().numpy()
+
+        return obs_np, float(torch.mean(reward).item()), terminated, truncated, info
 
     def save_video(self, filename):
         if not self.record:
