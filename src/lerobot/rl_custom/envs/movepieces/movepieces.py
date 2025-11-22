@@ -148,6 +148,7 @@ class MovePiecesEnv(gym.Env):
                     visualization=True,
                     convexify=False,
                     parse_glb_with_trimesh=True,  # load GLB colors/materials
+                    group_by_material=False,      # preserve per-vertex/per-face colors from GLB
                 )
             )
             for spec in self.piece_specs
