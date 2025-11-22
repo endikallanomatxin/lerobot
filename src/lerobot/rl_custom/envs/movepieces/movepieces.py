@@ -80,7 +80,7 @@ class MovePiecesEnv(gym.Env):
                 show_link_frame=False,
                 show_cameras=False,  # keep viewer clean; pop-ups handled via OpenCV
                 plane_reflection=True,
-                ambient_light=(0.1, 0.1, 0.1),
+                ambient_light=(0.3, 0.3, 0.3),  # brighten camera views a bit
                 n_rendered_envs=rendered_envs,
             ),
             renderer=gs.renderers.Rasterizer(),
@@ -90,9 +90,35 @@ class MovePiecesEnv(gym.Env):
 
         # Camera setups (roughly aligned with wrist/overhead vantage points).
         default_cam_setups = {
-            # Left/right cameras are placed near each robot base to mimic wrist-mounted views.
-            "left_wrist": {"res": (640, 480), "pos": (0.37, -0.05, 0.22), "lookat": (0.20, -0.10, 0.05), "fov": 70},
-            "right_wrist": {"res": (640, 480), "pos": (-0.37, -0.05, 0.22), "lookat": (-0.20, -0.10, 0.05), "fov": 70},
+            # Left/right cameras follow the gripper tip with a small offset above and behind the tool.
+            "left_wrist": {
+                "res": (640, 480),
+                "pos": (0.37, -0.05, 0.22),
+                "lookat": (0.20, -0.10, 0.05),
+                "fov": 80,  # wider to include the jaws
+                # Rigidly mounted to the gripper link: offset and optical axis expressed in the link frame.
+                "follow": {
+                    "side": "left",
+                    "link": "gripper",  # fixed gripper body (not the moving tip)
+                    # Mount pulled back/above/left so jaws appear in frame.
+                    "offset": (-0.12, 0.07, 0.03),
+                    # Aim forward/down; shorter ray to keep gripper visible.
+                    "forward": (0.0, 0.0, -0.18),
+                },
+            },
+            "right_wrist": {
+                "res": (640, 480),
+                "pos": (-0.37, -0.05, 0.22),
+                "lookat": (-0.20, -0.10, 0.05),
+                "fov": 80,
+                "follow": {
+                    "side": "right",
+                    "link": "gripper",
+                    # Mirrored mount on the right gripper.
+                    "offset": (-0.12, -0.07, 0.03),
+                    "forward": (0.0, 0.0, -0.18),
+                },
+            },
             "overhead": {"res": (640, 480), "pos": (0.0, -0.10, 0.75), "lookat": (0.0, -0.10, 0.05), "fov": 60},
         }
         cam_cfg = default_cam_setups if camera_setups is None else camera_setups
@@ -100,6 +126,7 @@ class MovePiecesEnv(gym.Env):
             name: self.scene.add_camera(res=tuple(cfg["res"]), pos=cfg["pos"], lookat=cfg["lookat"], fov=cfg["fov"], GUI=False)
             for name, cfg in cam_cfg.items()
         }
+        self.camera_setups = cam_cfg
 
         # self.plane = self.scene.add_entity(gs.morphs.Plane())
         # Table spans 0.8 m along x (between robots) and sits flush with the ground (top at z=0).
@@ -331,6 +358,7 @@ class MovePiecesEnv(gym.Env):
                 obs_dict[f"{side}_{joint}.pos"] = val.detach().cpu().numpy().astype(np.float32)
 
         if self.cameras:
+            self._update_camera_poses()
             pixels = {}
             for name, cam in self.cameras.items():
                 try:
@@ -823,6 +851,70 @@ class MovePiecesEnv(gym.Env):
         rotvec[nonzero] = axis[nonzero] * angle[nonzero]
         rotvec[~nonzero] = 2.0 * xyz[~nonzero]
         return rotvec
+
+
+    def _quat_to_rotmat(self, quat: torch.Tensor) -> torch.Tensor:
+        """
+        Convert quaternion (...,4) to rotation matrix (...,3,3).
+        """
+        quat = torch.as_tensor(quat, device=self.device, dtype=torch.float32)
+        norm = torch.linalg.vector_norm(quat, dim=-1, keepdim=True).clamp_min(1e-8)
+        q = quat / norm
+        w, x, y, z = q.unbind(-1)
+        ww, xx, yy, zz = w * w, x * x, y * y, z * z
+        wx, wy, wz = w * x, w * y, w * z
+        xy, xz, yz = x * y, x * z, y * z
+        rot = torch.stack(
+            [
+                ww + xx - yy - zz,
+                2 * (xy - wz),
+                2 * (xz + wy),
+                2 * (xy + wz),
+                ww - xx + yy - zz,
+                2 * (yz - wx),
+                2 * (xz - wy),
+                2 * (yz + wx),
+                ww - xx - yy + zz,
+            ],
+            dim=-1,
+        ).reshape(q.shape[:-1] + (3, 3))
+        return rot
+
+    def _update_camera_poses(self):
+        """
+        Move cameras that are configured to follow robot links (wrist views).
+        Only updates env 0 because pop-ups visualize a single env.
+        """
+        if not self.cameras:
+            return
+        env_idx = 0
+        for name, cfg in self.camera_setups.items():
+            follow_cfg = cfg.get("follow")
+            if not follow_cfg:
+                continue
+            side = follow_cfg["side"]
+            link_name = follow_cfg["link"]
+            offset = torch.tensor(follow_cfg.get("offset", (0.0, 0.0, 0.0)), device=self.device, dtype=torch.float32)
+            forward = torch.tensor(follow_cfg.get("forward", (0.0, 0.0, -0.25)), device=self.device, dtype=torch.float32)
+
+            robot_idx = self.side_to_robot_idx[side]
+            link = self.robots[robot_idx].get_link(link_name)
+            link_pos = torch.as_tensor(link.get_pos(), device=self.device, dtype=torch.float32)
+            link_quat = torch.as_tensor(link.get_quat(), device=self.device, dtype=torch.float32)
+
+            if link_pos.ndim > 1:
+                link_pos = link_pos[env_idx]
+            if link_quat.ndim > 1:
+                link_quat = link_quat[env_idx]
+
+            rot = self._quat_to_rotmat(link_quat)
+            cam_pos = link_pos + rot @ offset
+            cam_forward = rot @ forward
+            cam_lookat = cam_pos + cam_forward
+
+            cam = self.cameras[name]
+            cam.set_pose(pos=cam_pos.detach().cpu().numpy(), lookat=cam_lookat.detach().cpu().numpy())
+
 
     def _rotation_error_rotvec(self, current: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         delta = self._quat_multiply(target, self._quat_conjugate(current))
