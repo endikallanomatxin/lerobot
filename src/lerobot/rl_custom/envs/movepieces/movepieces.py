@@ -648,7 +648,7 @@ class MovePiecesEnv(gym.Env):
         return [
             PieceSpec(
                 name="motor_holder_so101_base_v1",
-                mesh_file=assets_dir / "motor_holder_so101_base_v1.glb",
+                mesh_file=assets_dir / "motor_holder_so101_wrist_v1.glb",
                 initial=PiecePose(pos=(-0.03, 0.12, resting_z), quat=rot_yz_90),
                 target=PiecePose(pos=(-0.03, -0.12, resting_z), quat=rot_yz_90),
                 color=(0.98, 0.38, 0.00),
