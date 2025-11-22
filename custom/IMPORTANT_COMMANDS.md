@@ -57,3 +57,24 @@ lerobot-record \
 python -m lerobot.rl_custom.train_genesis --device cuda --batch_size 16 --max_steps 300 --steps 400
 ```
 
+
+Entrenamiento supervisado:
+
+```sh
+lerobot-train \
+  --dataset.repo_id=local/bimanual-so101-demo-30 \
+  --policy.type=act \
+  --output_dir=outputs/train/act_bimanual-so101-demo-30 \
+  --job_name=act_bimanual-so101-demo-30 \
+  --policy.device=cuda \
+  --policy.push_to_hub=false \
+  --dataset.video_backend=pyav \
+  --batch_size=4 \
+  --num_workers=2 \
+  --steps=20000 \
+  --eval_freq=5000 \
+  --save_freq=5000
+```
+
+
+
