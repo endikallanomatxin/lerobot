@@ -609,8 +609,11 @@ class MovePiecesEnv(gym.Env):
         rot_z_180 = (0.0, 0.0, 0.0, 1.0)
         rot_y_180 = (0.0, 0.0, 1.0, 0.0)
         rot_y_90  = (math.sqrt(0.5), 0.0, math.sqrt(0.5), 0.0)
+        rot_y_minus_90 = (math.sqrt(0.5), 0.0, -math.sqrt(0.5), 0.0)
         rot_yz_90 = (0.5, -0.5, 0.5, 0.5)
         rot_yz_90_180 = (0, -0.7071, 0, 0.7071)
+        rot_zy_90_180 = (0, math.sqrt(0.5), -math.sqrt(0.5), 0)
+        rot_zy_90_m90 = (0.5, -0.5, -0.5, 0.5)
         moving_jaw_resting_z = resting_z + 0.02
         return [
             PieceSpec(
@@ -623,14 +626,14 @@ class MovePiecesEnv(gym.Env):
             PieceSpec(
                 name="moving_jaw_so101_v1",
                 mesh_file=assets_dir / "moving_jaw_so101_v1.glb",
-                initial=PiecePose(pos=(0.08, 0.15, moving_jaw_resting_z), quat=rot_y_90),
+                initial=PiecePose(pos=(0.08, 0.15, moving_jaw_resting_z), quat=rot_y_minus_90),
                 target=PiecePose(pos=(0.15, target_y - 0.05, target_z), quat=identity),
                 color=(0.98, 0.38, 0.00),
             ),
             PieceSpec(
                 name="under_arm_so101_v1",
                 mesh_file=assets_dir / "under_arm_so101_v1.glb",
-                initial=PiecePose(pos=(-0.28, -0.1, resting_z), quat=rot_z_90),
+                initial=PiecePose(pos=(-0.08, 0.115, resting_z), quat=rot_zy_90_m90),
                 target=PiecePose(pos=(-0.25, target_y - 0.10, target_z), quat=identity),
                 color=(0.98, 0.38, 0.00),
             )
