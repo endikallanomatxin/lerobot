@@ -592,7 +592,7 @@ class MovePiecesEnv(gym.Env):
                 specs.append(PieceSpec(name=name, mesh_file=mesh_path, initial=initial, target=target, color=color, scale=scale))
             return specs
 
-        resting_z = self.print_bed_top_z + 0.01
+        resting_z = self.print_bed_top_z + 0.03
         target_z = self.print_bed_top_z + 0.02
         target_y = 0.30
         identity = (1.0, 0.0, 0.0, 0.0)
@@ -601,47 +601,26 @@ class MovePiecesEnv(gym.Env):
         rot_y_180 = (0.0, 0.0, 1.0, 0.0)
         return [
             PieceSpec(
-                name="base_so101_v2",
-                mesh_file=assets_dir / "base_so101_v2.stl",
-                initial=PiecePose(pos=(-0.18, -0.34, resting_z), quat=identity),
-                target=PiecePose(pos=(-0.25, target_y, target_z), quat=identity),
-                color=(0.85, 0.18, 0.20),
-            ),
-            PieceSpec(
-                name="base_motor_holder_so101_v1",
-                mesh_file=assets_dir / "base_motor_holder_so101_v1.stl",
-                initial=PiecePose(pos=(-0.02, -0.34, resting_z), quat=rot_z_90),
+                name="motor_holder_so101_base_v1",
+                mesh_file=assets_dir / "motor_holder_so101_base_v1.stl",
+                initial=PiecePose(pos=(0, -0.1, resting_z), quat=identity),
                 target=PiecePose(pos=(-0.05, target_y + 0.05, target_z), quat=rot_z_90),
-                color=(0.98, 0.62, 0.15),
+                color=(0.98, 0.37, 0.00),
             ),
             PieceSpec(
-                name="upper_arm_so101_v1",
-                mesh_file=assets_dir / "upper_arm_so101_v1.stl",
-                initial=PiecePose(pos=(0.12, -0.34, resting_z), quat=rot_y_180),
+                name="moving_jaw_so101_v1",
+                mesh_file=assets_dir / "moving_jaw_so101_v1.stl",
+                initial=PiecePose(pos=(0.08, -0.1, resting_z), quat=identity),
                 target=PiecePose(pos=(0.15, target_y - 0.05, target_z), quat=rot_y_180),
-                color=(0.26, 0.56, 0.95),
+                color=(0.98, 0.38, 0.00),
             ),
             PieceSpec(
                 name="under_arm_so101_v1",
                 mesh_file=assets_dir / "under_arm_so101_v1.stl",
-                initial=PiecePose(pos=(-0.18, -0.26, resting_z), quat=identity),
+                initial=PiecePose(pos=(-0.08, -0.1, resting_z), quat=identity),
                 target=PiecePose(pos=(-0.25, target_y - 0.10, target_z), quat=identity),
-                color=(0.35, 0.82, 0.55),
-            ),
-            PieceSpec(
-                name="rotation_pitch_so101_v1",
-                mesh_file=assets_dir / "rotation_pitch_so101_v1.stl",
-                initial=PiecePose(pos=(-0.02, -0.26, resting_z), quat=rot_z_90),
-                target=PiecePose(pos=(-0.05, target_y + 0.10, target_z), quat=rot_z_90),
-                color=(0.64, 0.38, 0.95),
-            ),
-            PieceSpec(
-                name="wrist_roll_pitch_so101_v2",
-                mesh_file=assets_dir / "wrist_roll_pitch_so101_v2.stl",
-                initial=PiecePose(pos=(0.12, -0.26, resting_z), quat=rot_z_180),
-                target=PiecePose(pos=(0.15, target_y + 0.00, target_z), quat=rot_z_180),
-                color=(0.95, 0.32, 0.75),
-            ),
+                color=(0.98, 0.38, 0.00),
+            )
         ]
 
     def _reset_pieces(self):
