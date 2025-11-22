@@ -4,6 +4,10 @@ Minimal training harness to roll out the custom MovePieces Genesis env.
 This is a stub to verify end-to-end wiring (env -> wrapper -> policy).
 It runs random actions by default; plug a pretrained ACT policy with
 `--policy_path` to drive actions from BC instead.
+
+Example:
+python -m lerobot.rl_custom.train_genesis --device cuda --batch_size 16 --max_steps 300 --steps 400
+
 """
 
 from __future__ import annotations
