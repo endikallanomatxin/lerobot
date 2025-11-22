@@ -92,30 +92,35 @@ class MovePiecesEnv(gym.Env):
             # Left/right cameras follow the gripper tip with a small offset above and behind the tool.
             "left_wrist": {
                 "res": (640, 480),
-                "pos": (0.37, -0.05, 0.22),
-                "lookat": (0.20, -0.10, 0.05),
-                "fov": 80,  # wider to include the jaws
+                "pos": (0, 0, 0),  # Se sobreescribe, así que da igual
+                "lookat": (0, 0, 0),
+                "fov": 120,  # wide enough to see el útil completo
                 # Rigidly mounted to the gripper link: offset and optical axis expressed in the link frame.
+                "near": 0.0001,
                 "follow": {
                     "side": "left",
-                    "link": "gripper",  # fixed gripper body (not the moving tip)
-                    # Mount pulled back/above/left so jaws appear in frame.
-                    "offset": (-0.12, 0.07, 0.03),
-                    # Aim forward/down; shorter ray to keep gripper visible.
-                    "forward": (0.0, 0.0, -0.18),
+                    "link": "gripper_tip",
+                    # Colocamos la cámara algo por detrás y por encima para que el gripper quede centrado.
+                    "offset": (-0.12, 0.06, 0.14),
+                    # Mira ligeramente hacia delante y abajo para que se vea la pinza completa.
+                    "forward": (0.02, -0.02, -0.20),
+                    # Keep a consistent roll relative to the gripper frame.
+                    "up": (0.0, 1.0, 0.0),
                 },
             },
             "right_wrist": {
                 "res": (640, 480),
-                "pos": (-0.37, -0.05, 0.22),
-                "lookat": (-0.20, -0.10, 0.05),
-                "fov": 80,
+                "pos": (0, 0, 0),  # Se sobreescribe, así que da igual
+                "lookat": (0, 0, 0),
+                "fov": 120,
+                "near": 0.0001,
                 "follow": {
                     "side": "right",
-                    "link": "gripper",
+                    "link": "gripper_tip",
                     # Mirrored mount on the right gripper.
-                    "offset": (-0.12, -0.07, 0.03),
-                    "forward": (0.0, 0.0, -0.18),
+                    "offset": (-0.12, -0.06, 0.14),
+                    "forward": (0.02, 0.02, -0.20),
+                    "up": (0.0, -1.0, 0.0),
                 },
             },
             "overhead": {"res": (640, 480), "pos": (0.0, -0.10, 0.75), "lookat": (0.0, -0.10, 0.05), "fov": 60},
@@ -189,6 +194,7 @@ class MovePiecesEnv(gym.Env):
         self.num_pieces = len(self.piece_entities)
 
         self.scene.build(n_envs=batch_size)
+        self._attach_follow_cameras()
 
         self.jnt_names = [
             "shoulder_pan",
@@ -724,6 +730,48 @@ class MovePiecesEnv(gym.Env):
         ).reshape(q.shape[:-1] + (3, 3))
         return rot
 
+    def _attach_follow_cameras(self):
+        """
+        Attach eye-in-hand cameras to the requested robot links with a fixed transform.
+        """
+        if not self.cameras:
+            return
+        for name, cfg in self.camera_setups.items():
+            follow_cfg = cfg.get("follow")
+            if not follow_cfg:
+                continue
+            robot_idx = self.side_to_robot_idx[follow_cfg["side"]]
+            link = self.robots[robot_idx].get_link(follow_cfg["link"])
+            offset_T = self._camera_offset_transform(follow_cfg)
+            self.cameras[name].attach(link, offset_T)
+
+    def _camera_offset_transform(self, follow_cfg: dict) -> np.ndarray:
+        """
+        Build a 4x4 transform in the link frame from offset/forward/up parameters.
+        """
+        offset = np.asarray(follow_cfg.get("offset", (0.0, 0.0, 0.0)), dtype=np.float32)
+        forward = np.asarray(follow_cfg.get("forward", (0.0, 0.0, -0.15)), dtype=np.float32)
+        up_cfg = follow_cfg.get("up", (0.0, 1.0, 0.0))
+        up = np.asarray(up_cfg, dtype=np.float32)
+
+        forward_norm = np.linalg.norm(forward)
+        if forward_norm < 1e-6:
+            raise ValueError("Camera follow config requires non-zero 'forward' vector")
+        forward_dir = forward / forward_norm
+
+        # Ensure up is not colinear with forward to avoid roll jitter.
+        up = up - forward_dir * np.dot(up, forward_dir)
+        up_norm = np.linalg.norm(up)
+        if up_norm < 1e-6:
+            fallback = np.array((1.0, 0.0, 0.0), dtype=np.float32)
+            up = fallback - forward_dir * np.dot(fallback, forward_dir)
+            up = up / np.linalg.norm(up)
+        else:
+            up = up / up_norm
+
+        lookat = offset + forward_dir
+        return gs.pos_lookat_up_to_T(offset, lookat, up)
+
     def _update_camera_poses(self):
         """
         Move cameras that are configured to follow robot links (wrist views).
@@ -736,28 +784,7 @@ class MovePiecesEnv(gym.Env):
             follow_cfg = cfg.get("follow")
             if not follow_cfg:
                 continue
-            side = follow_cfg["side"]
-            link_name = follow_cfg["link"]
-            offset = torch.tensor(follow_cfg.get("offset", (0.0, 0.0, 0.0)), device=self.device, dtype=torch.float32)
-            forward = torch.tensor(follow_cfg.get("forward", (0.0, 0.0, -0.25)), device=self.device, dtype=torch.float32)
-
-            robot_idx = self.side_to_robot_idx[side]
-            link = self.robots[robot_idx].get_link(link_name)
-            link_pos = torch.as_tensor(link.get_pos(), device=self.device, dtype=torch.float32)
-            link_quat = torch.as_tensor(link.get_quat(), device=self.device, dtype=torch.float32)
-
-            if link_pos.ndim > 1:
-                link_pos = link_pos[env_idx]
-            if link_quat.ndim > 1:
-                link_quat = link_quat[env_idx]
-
-            rot = self._quat_to_rotmat(link_quat)
-            cam_pos = link_pos + rot @ offset
-            cam_forward = rot @ forward
-            cam_lookat = cam_pos + cam_forward
-
-            cam = self.cameras[name]
-            cam.set_pose(pos=cam_pos.detach().cpu().numpy(), lookat=cam_lookat.detach().cpu().numpy())
+            self.cameras[name].move_to_attach()
 
 
     def _rotation_error_rotvec(self, current: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
