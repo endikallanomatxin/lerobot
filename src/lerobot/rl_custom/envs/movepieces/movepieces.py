@@ -147,7 +147,7 @@ class MovePiecesEnv(gym.Env):
                     collision=True,
                     visualization=True,
                     convexify=False,
-                    parse_glb_with_trimesh=True,  # ensure GLB vertex colors/materials are loaded
+                    parse_glb_with_trimesh=True,  # load GLB colors/materials
                 )
             )
             for spec in self.piece_specs
@@ -606,14 +606,14 @@ class MovePiecesEnv(gym.Env):
                 name="motor_holder_so101_base_v1",
                 mesh_file=assets_dir / "motor_holder_so101_base_v1.glb",
                 initial=PiecePose(pos=(0, -0.1, resting_z), quat=identity),
-                target=PiecePose(pos=(-0.05, target_y + 0.05, target_z), quat=rot_z_90),
+                target=PiecePose(pos=(-0.05, target_y + 0.05, target_z), quat=identity),
                 color=(0.98, 0.38, 0.00),
             ),
             PieceSpec(
                 name="moving_jaw_so101_v1",
                 mesh_file=assets_dir / "moving_jaw_so101_v1.glb",
                 initial=PiecePose(pos=(0.08, -0.1, resting_z), quat=identity),
-                target=PiecePose(pos=(0.15, target_y - 0.05, target_z), quat=rot_y_180),
+                target=PiecePose(pos=(0.15, target_y - 0.05, target_z), quat=identity),
                 color=(0.98, 0.38, 0.00),
             ),
             PieceSpec(
