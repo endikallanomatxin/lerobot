@@ -16,12 +16,6 @@ El entorno usa génesis para simulación.
 
 ## TODO
 
-- Asegurarnos de que el "idioma" que hablan el entorno y la policy es consistente (shapes, tipos,
-  rangos de acción, etc) con LeRobot bimanual que estamos usando en real.
-
-- Añadir renderizado de cámaras en el entorno (similar a lo que hace
-  `lerobot-record` en real) para poder usarlo en el entrenamiento RL.
-
 - Arreglar el warning que salta al entrenar:
 
 ```
