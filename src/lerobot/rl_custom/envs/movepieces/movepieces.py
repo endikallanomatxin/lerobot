@@ -70,16 +70,17 @@ class MovePiecesEnv(gym.Env):
 
         gs.init(backend=gs.gs_backend.gpu, performance_mode=True)
 
+        rendered_envs = 1 if show_cameras else min(4, batch_size)
         self.scene = gs.Scene(
             sim_options=gs.options.SimOptions(dt=1 / 60),
             vis_options=gs.options.VisOptions(
                 show_world_frame=True,
                 world_frame_size=1.0,
                 show_link_frame=False,
-                show_cameras=show_cameras,
+                show_cameras=False,  # keep viewer clean; pop-ups handled via OpenCV
                 plane_reflection=True,
                 ambient_light=(0.1, 0.1, 0.1),
-                n_rendered_envs=min(4, batch_size),
+                n_rendered_envs=rendered_envs,
             ),
             renderer=gs.renderers.Rasterizer(),
             profiling_options=gs.options.ProfilingOptions(show_FPS=False),
@@ -88,13 +89,14 @@ class MovePiecesEnv(gym.Env):
 
         # Camera setups (roughly aligned with wrist/overhead vantage points).
         default_cam_setups = {
-            "left_wrist": {"res": (640, 480), "pos": (-0.35, -0.05, 0.25), "lookat": (0.0, -0.10, 0.05), "fov": 70},
-            "right_wrist": {"res": (640, 480), "pos": (0.35, -0.05, 0.25), "lookat": (0.0, -0.10, 0.05), "fov": 70},
+            # Left/right cameras are placed near each robot base to mimic wrist-mounted views.
+            "left_wrist": {"res": (640, 480), "pos": (0.37, -0.05, 0.22), "lookat": (0.20, -0.10, 0.05), "fov": 70},
+            "right_wrist": {"res": (640, 480), "pos": (-0.37, -0.05, 0.22), "lookat": (-0.20, -0.10, 0.05), "fov": 70},
             "overhead": {"res": (640, 480), "pos": (0.0, -0.10, 0.75), "lookat": (0.0, -0.10, 0.05), "fov": 60},
         }
         cam_cfg = default_cam_setups if camera_setups is None else camera_setups
         self.cameras = {
-            name: self.scene.add_camera(res=tuple(cfg["res"]), pos=cfg["pos"], lookat=cfg["lookat"], fov=cfg["fov"], GUI=show_cameras)
+            name: self.scene.add_camera(res=tuple(cfg["res"]), pos=cfg["pos"], lookat=cfg["lookat"], fov=cfg["fov"], GUI=False)
             for name, cfg in cam_cfg.items()
         }
 
