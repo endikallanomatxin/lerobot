@@ -14,6 +14,13 @@ from gymnasium.utils import seeding
 class MovePiecesEnv(gym.Env):
     """
     Genesis bimanual environment wrapped as a Gymnasium Env.
+
+    Observations/actions are exposed with the same key/range conventions as
+    the real bimanual SO101 robot:
+    - Joint keys: left/right + {shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll, gripper}.pos
+    - Joint ranges: arms in [-100, 100], gripper in [0, 100] (Feetech-style normalization).
+
+    The env still keeps a compact `environment_state` for debugging/rewards.
     """
 
     metadata = {
@@ -75,6 +82,9 @@ class MovePiecesEnv(gym.Env):
             {"pos": (0.25, 0.0, 0.0), "quat": (0.0, 0.0, 0.0, 1.0)},
             {"pos": (-0.25, 0.0, 0.0), "quat": (1.0, 0.0, 0.0, 0.0)},
         ]
+        # Maintain a fixed ordering so we can map left/right keys deterministically.
+        self.sides = ["left", "right"]
+        self.side_to_robot_idx = {"left": 0, "right": 1}
         self.robots = [
             self.scene.add_entity(
                 gs.morphs.MJCF(file=str(robot_path), pos=config["pos"], quat=config.get("quat"))
@@ -107,16 +117,29 @@ class MovePiecesEnv(gym.Env):
 
         self.obs_dim = self.num_robots * (2 * self.dofs_per_robot + 6) + 3
         self.act_dim = self.num_robots * self.dofs_per_robot
-        self.observation_space = spaces.Dict(
-            {
-                "environment_state": spaces.Box(
-                    low=-np.inf,
-                    high=np.inf,
-                    shape=(self.batch_size, self.obs_dim),
-                    dtype=np.float32,
-                )
-            }
-        )
+        self.action_keys = [
+            f"{side}_{joint}.pos" for side in self.sides for joint in self.jnt_names
+        ]
+        obs_spaces: dict[str, gym.Space] = {
+            "environment_state": spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=(self.batch_size, self.obs_dim),
+                dtype=np.float32,
+            )
+        }
+        for key in self.action_keys:
+            if key.endswith("gripper.pos"):
+                low, high = 0.0, 100.0
+            else:
+                low, high = -100.0, 100.0
+            obs_spaces[key] = spaces.Box(
+                low=low,
+                high=high,
+                shape=(self.batch_size,),
+                dtype=np.float32,
+            )
+        self.observation_space = spaces.Dict(obs_spaces)
         self.action_space = spaces.Box(
             low=-1.0,
             high=1.0,
@@ -176,7 +199,23 @@ class MovePiecesEnv(gym.Env):
             dim=1,
         )
         obs = torch.nan_to_num(obs, nan=0.0, posinf=1e4, neginf=-1e4)
-        return {"environment_state": obs.detach().cpu().numpy().astype(np.float32)}
+        obs_dict = {"environment_state": obs.detach().cpu().numpy().astype(np.float32)}
+
+        # Add per-joint observations aligned with the real robot key/range convention.
+        # Body joints are scaled to [-100, 100], gripper to [0, 100].
+        dof_ang = dof_ang.permute(1, 0, 2)  # (batch, num_robots, dofs_per_robot)
+        for side, robot_idx in self.side_to_robot_idx.items():
+            for j, joint in enumerate(self.jnt_names):
+                ang = dof_ang[:, robot_idx, j]
+                if joint == "gripper":
+                    val = (ang - self.joint_lower[j]) / (self.joint_upper[j] - self.joint_lower[j] + 1e-6) * 100.0
+                else:
+                    mid = 0.5 * (self.joint_lower[j] + self.joint_upper[j])
+                    half = 0.5 * (self.joint_upper[j] - self.joint_lower[j] + 1e-6)
+                    val = torch.clamp((ang - mid) / half, -1.0, 1.0) * 100.0
+                obs_dict[f"{side}_{joint}.pos"] = val.detach().cpu().numpy().astype(np.float32)
+
+        return obs_dict
 
     def compute_reward(self):
         reward_dict = {}
@@ -258,9 +297,7 @@ class MovePiecesEnv(gym.Env):
         return reward, reward_dict, best_distance.clone().detach()
 
     def step(self, actions, record: bool = False):
-        if isinstance(actions, np.ndarray):
-            actions = torch.from_numpy(actions).to(self.device)
-        actions = actions.reshape(self.batch_size, self.num_robots, self.dofs_per_robot)
+        actions = self._convert_actions(actions)
         for idx, robot in enumerate(self.robots):
             robot_actions = actions[:, idx, :]
             angles = actions_to_angles(robot_actions, self.joint_lower, self.joint_upper)
@@ -353,6 +390,57 @@ class MovePiecesEnv(gym.Env):
         if missing:
             raise ValueError(f"Missing joint limits for: {missing}")
         return limits
+
+    def _convert_actions(self, actions) -> torch.Tensor:
+        """
+        Convert incoming actions to a tensor shaped (batch, num_robots, dofs_per_robot)
+        with values in [-1, 1] per joint.
+
+        Accepts:
+        - dict keyed by left/right joint names in robot convention.
+        - torch.Tensor or np.ndarray shaped (batch, act_dim) or (act_dim,).
+        """
+        if isinstance(actions, dict):
+            per_joint = []
+            for key in self.action_keys:
+                if key not in actions:
+                    raise KeyError(f"Missing action key '{key}' in action dict.")
+                val = actions[key]
+                tensor = torch.as_tensor(val, device=self.device, dtype=torch.float32)
+                if tensor.ndim == 0:
+                    tensor = tensor.unsqueeze(0)
+                per_joint.append(tensor)
+            stacked = torch.stack(per_joint, dim=1)  # (batch, act_dim)
+            actions = stacked
+
+        if isinstance(actions, np.ndarray):
+            actions = torch.from_numpy(actions).to(self.device)
+        elif not isinstance(actions, torch.Tensor):
+            # Fallback to tensor conversion for lists or other array-likes.
+            actions = torch.as_tensor(actions, device=self.device, dtype=torch.float32)
+
+        if actions.ndim == 1:
+            actions = actions.unsqueeze(0)
+
+        # Convert to normalized [-1, 1]. Allow both robot-range inputs ([-100, 100] / [0, 100])
+        # and already-normalized inputs ([-1, 1]) for convenience.
+        treat_as_normalized = torch.max(torch.abs(actions)) <= 1.05
+        if actions.shape[-1] != self.act_dim:
+            raise ValueError(f"Expected action dim {self.act_dim}, got {actions.shape}")
+
+        actions = actions.reshape(-1, self.num_robots, self.dofs_per_robot)
+        normalized = torch.empty_like(actions, dtype=torch.float32)
+        for j, joint in enumerate(self.jnt_names):
+            joint_vals = actions[:, :, j]
+            if treat_as_normalized:
+                norm = torch.clamp(joint_vals, -1.0, 1.0)
+            elif joint == "gripper":
+                norm = torch.clamp(joint_vals, 0.0, 100.0) / 50.0 - 1.0
+            else:
+                norm = torch.clamp(joint_vals, -100.0, 100.0) / 100.0
+            normalized[:, :, j] = norm
+
+        return normalized
 
 
 def actions_to_angles(actions: torch.Tensor, joint_lower: torch.Tensor, joint_upper: torch.Tensor):

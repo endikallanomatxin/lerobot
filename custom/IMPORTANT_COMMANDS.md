@@ -1,13 +1,19 @@
 # Important commands for running bimanual SO101 experiments
 
-```bash
+```sh
+lerobot-setup-motors \
+  --teleop.type=so101_leader \
+  --teleop.port=/dev/ttyACM3
+```
+
+```sh
 export FOLLOWER_LEFT_PORT="/dev/ttyACM0"
 export FOLLOWER_RIGHT_PORT="/dev/ttyACM3"
 export LEADER_LEFT_PORT="/dev/ttyACM1"
 export LEADER_RIGHT_PORT="/dev/ttyACM2"
 ```
 
-```bash
+```sh
 lerobot-calibrate \
   --robot.type=bi_so101_follower \
   --robot.left_arm_port=$FOLLOWER_LEFT_PORT \
@@ -15,7 +21,7 @@ lerobot-calibrate \
   --robot.id=bimanual_follower
 ```
 
-```bash
+```sh
 lerobot-calibrate \
   --teleop.type=bi_so101_leader \
   --teleop.left_arm_port=$LEADER_LEFT_PORT \
@@ -23,7 +29,7 @@ lerobot-calibrate \
   --teleop.id=bimanual_leader
 ```
 
-```bash
+```sh
 lerobot-record \
   --robot.type=bi_so101_follower \
   --robot.left_arm_port=$FOLLOWER_LEFT_PORT \
@@ -47,7 +53,7 @@ lerobot-record \
   --dataset.push_to_hub=False
 ```
 
-```bash
+```sh
 python -m lerobot.rl_custom.train_genesis --device cuda --batch_size 16 --max_steps 300 --steps 400
 ```
 

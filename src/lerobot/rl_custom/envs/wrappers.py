@@ -22,7 +22,13 @@ class LeRobotGymEnvWrapper:
         return self._to_obs_dict(obs), info
 
     def step(self, action_tensor: torch.Tensor):
-        action_np = action_tensor.detach().cpu().numpy()
+        if isinstance(action_tensor, dict):
+            action_np = {
+                k: v.detach().cpu().numpy() if torch.is_tensor(v) else v for k, v in action_tensor.items()
+            }
+        else:
+            action_np = action_tensor.detach().cpu().numpy() if torch.is_tensor(action_tensor) else action_tensor
+
         obs, rew, term, trunc, info = self.env.step(action_np)
 
         obs_dict = self._to_obs_dict(obs)

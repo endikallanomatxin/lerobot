@@ -3,7 +3,10 @@ Minimal training harness to roll out the custom MovePieces Genesis env.
 
 This is a stub to verify end-to-end wiring (env -> wrapper -> policy).
 It runs random actions by default; plug a pretrained ACT policy with
-`--policy_path` to drive actions from BC instead.
+`--policy_path` to drive actions from BC instead. The env now speaks the same
+action/observation dialect as the SO101 bimanual robot:
+    - Actions: dict or tensor with 12 joints (`left/right_* .pos`), arms in [-100, 100], gripper in [0, 100].
+    - Observations: per-joint keys plus `environment_state` for debugging.
 
 Example:
 python -m lerobot.rl_custom.train_genesis --device cuda --batch_size 16 --max_steps 300 --steps 400
@@ -49,6 +52,7 @@ def main():
         batch_size=args.batch_size,
         max_steps=args.max_steps,
         show_viewer=args.show_viewer,
+        disable_env_checker=True,  # mixed obs/action dicts; we validate manually
     )
     env = LeRobotGymEnvWrapper(env)
 
