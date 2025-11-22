@@ -147,6 +147,7 @@ class MovePiecesEnv(gym.Env):
                     collision=True,
                     visualization=True,
                     convexify=False,
+                    parse_glb_with_trimesh=True,  # ensure GLB vertex colors/materials are loaded
                 )
             )
             for spec in self.piece_specs
@@ -587,7 +588,8 @@ class MovePiecesEnv(gym.Env):
                 tgt = entry["target"]
                 initial = PiecePose(pos=tuple(init["pos"]), quat=tuple(init.get("quat", (1.0, 0.0, 0.0, 0.0))))
                 target = PiecePose(pos=tuple(tgt["pos"]), quat=tuple(tgt.get("quat", (1.0, 0.0, 0.0, 0.0))))
-                color = tuple(entry.get("color", colors[idx % len(colors)]))
+                # color = tuple(entry.get("color", colors[idx % len(colors)]))
+                color = (0.98, 0.38, 0.00)
                 scale = float(entry.get("scale", 1.0))
                 specs.append(PieceSpec(name=name, mesh_file=mesh_path, initial=initial, target=target, color=color, scale=scale))
             return specs
@@ -602,21 +604,21 @@ class MovePiecesEnv(gym.Env):
         return [
             PieceSpec(
                 name="motor_holder_so101_base_v1",
-                mesh_file=assets_dir / "motor_holder_so101_base_v1.stl",
+                mesh_file=assets_dir / "motor_holder_so101_base_v1.glb",
                 initial=PiecePose(pos=(0, -0.1, resting_z), quat=identity),
                 target=PiecePose(pos=(-0.05, target_y + 0.05, target_z), quat=rot_z_90),
-                color=(0.98, 0.37, 0.00),
+                color=(0.98, 0.38, 0.00),
             ),
             PieceSpec(
                 name="moving_jaw_so101_v1",
-                mesh_file=assets_dir / "moving_jaw_so101_v1.stl",
+                mesh_file=assets_dir / "moving_jaw_so101_v1.glb",
                 initial=PiecePose(pos=(0.08, -0.1, resting_z), quat=identity),
                 target=PiecePose(pos=(0.15, target_y - 0.05, target_z), quat=rot_y_180),
                 color=(0.98, 0.38, 0.00),
             ),
             PieceSpec(
                 name="under_arm_so101_v1",
-                mesh_file=assets_dir / "under_arm_so101_v1.stl",
+                mesh_file=assets_dir / "under_arm_so101_v1.glb",
                 initial=PiecePose(pos=(-0.08, -0.1, resting_z), quat=identity),
                 target=PiecePose(pos=(-0.25, target_y - 0.10, target_z), quat=identity),
                 color=(0.98, 0.38, 0.00),
