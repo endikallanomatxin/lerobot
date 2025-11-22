@@ -148,7 +148,7 @@ class MovePiecesEnv(gym.Env):
                     visualization=True,
                     convexify=False,              # no global convex hull
                     decompose_nonconvex=True,     # split into convex parts to avoid interpenetration
-                    decompose_object_error_threshold=0.02,  # tighter fit; lower keeps shape, higher is coarser
+                    decompose_object_error_threshold=0.002,  # tighter fit to original geometry
                     merge_submeshes_for_collision=False,    # preserve per-part collision detail
                     parse_glb_with_trimesh=True,  # load GLB colors/materials
                     group_by_material=False,      # preserve per-vertex/per-face colors from GLB
@@ -625,7 +625,7 @@ class MovePiecesEnv(gym.Env):
             PieceSpec(
                 name="under_arm_so101_v1",
                 mesh_file=assets_dir / "under_arm_so101_v1.glb",
-                initial=PiecePose(pos=(-0.08, -0.1, resting_z), quat=identity),
+                initial=PiecePose(pos=(-0.28, -0.1, resting_z), quat=rot_z_90),
                 target=PiecePose(pos=(-0.25, target_y - 0.10, target_z), quat=identity),
                 color=(0.98, 0.38, 0.00),
             )
