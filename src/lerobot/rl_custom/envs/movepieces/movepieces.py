@@ -176,9 +176,12 @@ class MovePiecesEnv(gym.Env):
         # Decorative meshes (no collision) loaded from assets/custom.
         custom_dir = assets_root / "assets" / "custom"
         decorative_layout = [
-            {"file": "pinza.stl", "pos": self.piece_specs[0].initial.pos, "quat": self.piece_specs[0].initial.quat},
-            {"file": "brazo.stl", "pos": self.piece_specs[1].initial.pos, "quat": self.piece_specs[1].initial.quat},
-            {"file": "cuadrado.stl", "pos": self.piece_specs[2].initial.pos, "quat": self.piece_specs[2].initial.quat},
+            # Pinza: trasladada a (1, 1) en XY, rotada +90° en X
+            {"file": "pinza.glb", "pos": (1.0, 1.0, 0.02), "quat": (0.7071, 0.7071, 0.0, 0.0)},
+            # Brazo: trasladado a (1, 1) en XY, rotado +90° en Y
+            {"file": "brazo.glb", "pos": (1.0, 1.0, 0.02), "quat": (0.7071, 0.0, 0.7071, 0.0)},
+            # Cuadrado: trasladado a (1, 1) en XY, rotado +90° en Z
+            {"file": "cuadrado.glb", "pos": (1.0, 1.0, 0.02), "quat": (0.7071, 0.0, 0.0, 0.7071)},
         ]
         self.decorative_entities = []
         for deco in decorative_layout:
@@ -196,6 +199,7 @@ class MovePiecesEnv(gym.Env):
                         collision=False,
                         visualization=True,
                         convexify=False,
+                        parse_glb_with_trimesh=True,  # keep baked vertex colors from GLB
                     )
                 )
             )
