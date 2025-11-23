@@ -692,13 +692,7 @@ class MovePiecesEnv(gym.Env):
 
         moving_jaw_resting_z = resting_z + 0.02
         return [
-            PieceSpec(
-                name="motor_holder_so101_base_v1",
-                mesh_file=assets_dir / "motor_holder_so101_wrist_v1.glb",
-                initial=PiecePose(pos=(-0.03, 0.12, resting_z), quat=rot_yz_90),
-                target=PiecePose(pos=(-0.03, -0.12, resting_z), quat=rot_yz_90),
-                color=(0.98, 0.38, 0.00),
-            ),
+            # Orden left→right: moving_jaw, motor_holder, under_arm
             PieceSpec(
                 name="moving_jaw_so101_v1",
                 mesh_file=assets_dir / "moving_jaw_so101_v1.glb",
@@ -707,12 +701,19 @@ class MovePiecesEnv(gym.Env):
                 color=(0.98, 0.38, 0.00),
             ),
             PieceSpec(
+                name="motor_holder_so101_base_v1",
+                mesh_file=assets_dir / "motor_holder_so101_wrist_v1.glb",
+                initial=PiecePose(pos=(-0.03, 0.12, resting_z), quat=rot_yz_90),
+                target=PiecePose(pos=(-0.03, -0.12, resting_z), quat=rot_yz_90),
+                color=(0.98, 0.38, 0.00),
+            ),
+            PieceSpec(
                 name="under_arm_so101_v1",
                 mesh_file=assets_dir / "under_arm_so101_v1.glb",
                 initial=PiecePose(pos=(-0.08, 0.115, resting_z), quat=rot_zy_90_m90),
                 target=PiecePose(pos=(-0.135, -0.115, resting_z), quat=rot_zy_90_m90_m45z_15z),
                 color=(0.98, 0.38, 0.00),
-            )
+            ),
         ]
 
     def _reset_pieces(self):
