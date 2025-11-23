@@ -176,11 +176,11 @@ class MovePiecesEnv(gym.Env):
         custom_dir = assets_root / "assets" / "custom"
         decorative_layout = [
             # Pinza: trasladada a (1, 1) en XY, rotada +90° en X
-            {"file": "pinza.glb", "pos": (0.125, -0.1, self.print_bed_top_z), "quat": (0.683013, 0.183013, -0.683013, 0.183013)},
+            {"file": "pinza.glb", "pos": (0.125, -0.1, self.print_bed_top_z+0.001), "quat": (0.683013, 0.183013, -0.683013, 0.183013)},
             # Brazo: trasladado a (1, 1) en XY, rotado +90° en Y
-            {"file": "brazo.glb", "pos": (-0.135, -0.115, self.print_bed_top_z), "quat": (0.612372, 0.612372, 0.353553, 0.353553)},
+            {"file": "brazo.glb", "pos": (-0.135, -0.115, self.print_bed_top_z+0.001), "quat": (0.612372, 0.612372, 0.353553, 0.353553)},
             # Cuadrado: trasladado a (1, 1) en XY, rotado +90° en Z
-            {"file": "cuadrado.glb", "pos": (-0.03, -0.12, self.print_bed_top_z), "quat": (0.5, 0.5, -0.5, 0.5)},
+            {"file": "cuadrado.glb", "pos": (-0.03, -0.12, self.print_bed_top_z+0.001), "quat": (0.5, 0.5, -0.5, 0.5)},
         ]
         self.decorative_entities = []
         for deco in decorative_layout:
@@ -676,11 +676,14 @@ class MovePiecesEnv(gym.Env):
         rot_y_90  = (math.sqrt(0.5), 0.0, math.sqrt(0.5), 0.0)
         rot_y_minus_90 = (math.sqrt(0.5), 0.0, -math.sqrt(0.5), 0.0)
         rot_y_minus_90_45z = (0.6533, 0.2706, -0.6533, 0.2706)
+        rot_y_minus_90_45z_m15z = (0.6830, 0.1824,-0.6830, 0.1824)
         rot_yz_90 = (0.5, -0.5, 0.5, 0.5)
         rot_yz_90_180 = (0, -0.7071, 0, 0.7071)
         rot_zy_90_180 = (0, math.sqrt(0.5), -math.sqrt(0.5), 0)
         rot_zy_90_m90 = (0.5, -0.5, -0.5, 0.5)
         rot_zy_90_m90_m45z =  (0.6533, -0.6533, -0.2706, 0.2706)
+        rot_zy_90_m90_m45z_15z = (0.6124,-0.6124,-0.3536, 0.3536)
+
         moving_jaw_resting_z = resting_z + 0.02
         return [
             PieceSpec(
@@ -694,14 +697,14 @@ class MovePiecesEnv(gym.Env):
                 name="moving_jaw_so101_v1",
                 mesh_file=assets_dir / "moving_jaw_so101_v1.glb",
                 initial=PiecePose(pos=(0.08, 0.15, moving_jaw_resting_z), quat=rot_y_minus_90),
-                target=PiecePose(pos=(0.125, -0.1, moving_jaw_resting_z), quat=rot_y_minus_90_45z),
+                target=PiecePose(pos=(0.125, -0.1, moving_jaw_resting_z), quat=rot_y_minus_90_45z_m15z),
                 color=(0.98, 0.38, 0.00),
             ),
             PieceSpec(
                 name="under_arm_so101_v1",
                 mesh_file=assets_dir / "under_arm_so101_v1.glb",
                 initial=PiecePose(pos=(-0.08, 0.115, resting_z), quat=rot_zy_90_m90),
-                target=PiecePose(pos=(-0.135, -0.115, resting_z), quat=rot_zy_90_m90_m45z),
+                target=PiecePose(pos=(-0.135, -0.115, resting_z), quat=rot_zy_90_m90_m45z_15z),
                 color=(0.98, 0.38, 0.00),
             ),
             PieceSpec(
@@ -714,14 +717,14 @@ class MovePiecesEnv(gym.Env):
             PieceSpec(
                 name="moving_jaw_so101_v1",
                 mesh_file=assets_dir / "moving_jaw_so101_v1.glb",
-                initial=PiecePose(pos=(0.125, -0.1, moving_jaw_resting_z), quat=rot_y_minus_90_45z),
+                initial=PiecePose(pos=(0.125, -0.1, moving_jaw_resting_z), quat=rot_y_minus_90_45z_m15z),
                 target=PiecePose(pos=(0.125, -0.1, moving_jaw_resting_z), quat=rot_y_minus_90_45z),
                 color=(0.98, 0.38, 0.00),
             ),
             PieceSpec(
                 name="under_arm_so101_v1",
                 mesh_file=assets_dir / "under_arm_so101_v1.glb",
-                initial=PiecePose(pos=(-0.135, -0.115, resting_z), quat=rot_zy_90_m90_m45z),
+                initial=PiecePose(pos=(-0.135, -0.115, resting_z), quat=rot_zy_90_m90_m45z_15z),
                 target=PiecePose(pos=(-0.135, -0.115, resting_z), quat=rot_zy_90_m90_m45z),
                 color=(0.98, 0.38, 0.00),
             )
