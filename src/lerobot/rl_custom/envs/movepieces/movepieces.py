@@ -100,29 +100,30 @@ class MovePiecesEnv(gym.Env):
                 "follow": {
                     "side": "left",
                     "link": "gripper_tip",
-                    # Colocamos la cámara algo por detrás y por encima para que el gripper quede centrado.
-                    "offset": (-0.12, 0.06, 0.14),
-                    # Mira ligeramente hacia delante y abajo para que se vea la pinza completa.
-                    "forward": (0.02, -0.02, -0.20),
+                    # Colocamos la cámara detrás de la garra mirando hacia delante, pero viendo parte del útil.
+                    "offset": (0.0, 0.2, 0),
+                    "forward": (0.2, -0.2, 0.0),
                     # Keep a consistent roll relative to the gripper frame.
                     "up": (0.0, 1.0, 0.0),
+                    "orbit_deg": 0.0,
                 },
             },
             "right_wrist": {
                 "res": (640, 480),
                 "pos": (0, 0, 0),  # Se sobreescribe, así que da igual
-                "lookat": (0, 0, 0),
-                "fov": 120,
-                "near": 0.0001,
-                "follow": {
-                    "side": "right",
-                    "link": "gripper_tip",
-                    # Mirrored mount on the right gripper.
-                    "offset": (-0.12, -0.06, 0.14),
-                    "forward": (0.02, 0.02, -0.20),
-                    "up": (0.0, -1.0, 0.0),
+                    "lookat": (0, 0, 0),
+                    "fov": 120,
+                    "near": 0.0001,
+                    "follow": {
+                        "side": "right",
+                        "link": "gripper_tip",
+                        # Mirrored mount on the right gripper.
+                        "offset": (0.05, -0.04, -0.18),
+                        "forward": (0.00, -0.02, 0.24),
+                        "up": (0.0, -1.0, 0.0),
+                        "orbit_deg": 0.0,
+                    },
                 },
-            },
             "overhead": {"res": (640, 480), "pos": (0.0, -0.10, 0.75), "lookat": (0.0, -0.10, 0.05), "fov": 60},
         }
         cam_cfg = default_cam_setups if camera_setups is None else camera_setups
@@ -753,6 +754,9 @@ class MovePiecesEnv(gym.Env):
         forward = np.asarray(follow_cfg.get("forward", (0.0, 0.0, -0.15)), dtype=np.float32)
         up_cfg = follow_cfg.get("up", (0.0, 1.0, 0.0))
         up = np.asarray(up_cfg, dtype=np.float32)
+        orbit_deg = float(follow_cfg.get("orbit_deg", 0.0))
+        orbit_axis = np.asarray(follow_cfg.get("orbit_axis", (0.0, 0.0, 1.0)), dtype=np.float32)
+        roll_deg = float(follow_cfg.get("roll_deg", 0.0))
 
         forward_norm = np.linalg.norm(forward)
         if forward_norm < 1e-6:
@@ -768,6 +772,43 @@ class MovePiecesEnv(gym.Env):
             up = up / np.linalg.norm(up)
         else:
             up = up / up_norm
+
+        # Orbit the mount around a specified axis in the link frame (e.g., yaw 90 deg around the tool axis).
+        if abs(orbit_deg) > 1e-3:
+            axis_norm = np.linalg.norm(orbit_axis)
+            if axis_norm < 1e-6:
+                raise ValueError("orbit_axis must be non-zero when orbit_deg is specified")
+            axis = orbit_axis / axis_norm
+            theta = np.deg2rad(orbit_deg)
+
+            def rotate(vec):
+                return (
+                    vec * np.cos(theta)
+                    + np.cross(axis, vec) * np.sin(theta)
+                    + axis * np.dot(axis, vec) * (1 - np.cos(theta))
+                )
+
+            offset = rotate(offset)
+            forward_dir = rotate(forward_dir)
+            up = rotate(up)
+            # Re-orthogonalize after orbit.
+            forward_dir = forward_dir / (np.linalg.norm(forward_dir) + 1e-8)
+            up = up - forward_dir * np.dot(up, forward_dir)
+            up = up / (np.linalg.norm(up) + 1e-8)
+
+        # Optional roll around the forward axis to rotate the physical mount.
+        if abs(roll_deg) > 1e-3:
+            angle = np.deg2rad(roll_deg)
+            k = forward_dir
+
+            def rodrigues(v):
+                return v * np.cos(angle) + np.cross(k, v) * np.sin(angle) + k * np.dot(k, v) * (1 - np.cos(angle))
+
+            offset = rodrigues(offset)
+            up = rodrigues(up)
+            # Keep up orthogonal after rotation (numerical clean-up).
+            up = up - forward_dir * np.dot(up, forward_dir)
+            up = up / (np.linalg.norm(up) + 1e-8)
 
         lookat = offset + forward_dir
         return gs.pos_lookat_up_to_T(offset, lookat, up)
