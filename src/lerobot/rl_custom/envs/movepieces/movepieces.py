@@ -319,14 +319,15 @@ class MovePiecesEnv(gym.Env):
         self.pick_threshold = 0.025
         self.place_threshold = 0.02
         self.rotation_threshold = 0.05
-        # Heavier rewards for approaching and grasping/moving.
-        self.w_pos = 8.0
-        self.w_rot = 3.5
-        self.w_phase1 = 6.0    # encourage approaching the assigned piece
-        self.w_phase2 = 6.0    # encourage moving toward target
-        self.w_phase3_pos = 8.0
-        self.w_phase3_rot = 4.0
-        # Extra bonus for completing a piece (grasp + place).
+        # Heavier rewards for approaching, touching gently, and completing.
+        self.w_pos = 10.0
+        self.w_rot = 4.0
+        self.w_phase1 = 8.0    # strongly encourage approaching the assigned piece
+        self.w_phase2 = 7.5    # encourage moving toward target
+        self.w_phase3_pos = 9.0
+        self.w_phase3_rot = 5.0
+        # Bonus for gentle touch and completion.
+        self.touch_bonus = 3.0
         self.completion_bonus = 12.0
 
         if self.record:
@@ -461,6 +462,19 @@ class MovePiecesEnv(gym.Env):
         gripper_ang_vel = _safe(self._stack_link_states(self.gripper_link_name, "get_ang"))
         gripper_ang_mag = torch.linalg.vector_norm(gripper_ang_vel, dim=-1)
         gripper_height = gripper_pos[..., 2]
+        # Contact forces per robot (env, contact_idx, 3)
+        gripper_force_list = []
+        for robot in self.robots:
+            contact_info = robot.get_contacts()
+            force_a = torch.as_tensor(contact_info["force_a"], dtype=torch.float32, device=self.device)
+            gripper_force_list.append(force_a)
+        if gripper_force_list:
+            gripper_force = torch.stack(gripper_force_list, dim=0)  # (num_robots, env, contacts, 3)
+            gripper_force_mag = torch.linalg.vector_norm(gripper_force, dim=-1).sum(dim=-1)  # (num_robots, env)
+        else:
+            gripper_force_mag = torch.zeros((self.num_robots, self.batch_size), device=self.device)
+
+        dof_ang = _safe(self._stack_dof_states("get_dofs_position"))
 
         piece_pos = _safe(self._stack_piece_states("get_pos"))
         piece_quat = _safe(self._stack_piece_states("get_quat"))
@@ -494,10 +508,12 @@ class MovePiecesEnv(gym.Env):
 
         gripper_pos_batch = gripper_pos.permute(1, 0, 2)
         gripper_to_piece = gripper_pos_batch - active_piece_pos.unsqueeze(1)
-        gripper_distances = torch.linalg.vector_norm(gripper_to_piece, dim=-1)
+        gripper_distances = torch.linalg.vector_norm(gripper_to_piece, dim=-1)  # (batch, num_robots)
         # Assign robots: left (idx 0) handles pieces 0/1; right (idx 1) handles piece 2.
-        assigned_robot_idx = torch.where(self.active_piece_idx <= 1, torch.zeros_like(self.active_piece_idx), torch.ones_like(self.active_piece_idx))
-        assigned_dist = gripper_distances[batch_indices, assigned_robot_idx]
+        assigned_robot_idx = torch.where(
+            self.active_piece_idx <= 1, torch.zeros_like(self.active_piece_idx), torch.ones_like(self.active_piece_idx)
+        )
+        assigned_dist = gripper_distances.gather(1, assigned_robot_idx.unsqueeze(1)).squeeze(1)
         needs_pick = assigned_dist > self.pick_threshold
         far_from_target = active_pos_error > self.place_threshold
 
@@ -528,7 +544,9 @@ class MovePiecesEnv(gym.Env):
 
         # Penalize drifting away from the workspace center (avoid hiding in corners).
         table_center = torch.tensor(self.print_bed_center[:2], device=self.device, dtype=torch.float32)
-        assigned_gripper_xy = gripper_pos_batch[batch_indices, assigned_robot_idx, :2]
+        assigned_gripper_xy = gripper_pos_batch.gather(
+            1, assigned_robot_idx.view(-1, 1, 1).expand(-1, 1, 2)
+        ).squeeze(1)
         dist_center = torch.linalg.vector_norm(assigned_gripper_xy - table_center, dim=-1)
         safe_radius = 0.35
         drift_penalty = -3.0 * torch.clamp(dist_center - safe_radius, min=0.0)
@@ -537,15 +555,49 @@ class MovePiecesEnv(gym.Env):
         # Penalize touching the table with the gripper (z below bed top + small clearance).
         table_clearance = self.print_bed_top_z + 0.01
         gripper_table_penalty = torch.clamp(table_clearance - gripper_height, min=0.0)
-        table_penalty = -3.0 * gripper_table_penalty.mean(dim=0)
+        table_penalty = -7.0 * gripper_table_penalty.mean(dim=0)
         reward_dict["table_touch_penalty"] = torch.nan_to_num(table_penalty, nan=0.0).detach().cpu()
 
         # Penalize pieces falling off the table (z below bed top - margin).
         drop_margin = 0.01
         piece_height = piece_pos[..., 2]
         drop_penalty_mask = piece_height < (self.print_bed_top_z - drop_margin)
-        drop_penalty = -10.0 * drop_penalty_mask.float().sum(dim=0)
+        drop_penalty = -15.0 * drop_penalty_mask.float().sum(dim=0)
         reward_dict["piece_drop_penalty"] = torch.nan_to_num(drop_penalty, nan=0.0).detach().cpu()
+
+        # Gentle touch bonus: reward when assigned gripper is close and contact force is low.
+        touching = (assigned_dist < self.pick_threshold).float()
+        force_assigned = gripper_force_mag.permute(1, 0).gather(1, assigned_robot_idx.unsqueeze(1)).squeeze(1)
+        gentle_force = torch.exp(-0.3 * torch.clamp(force_assigned, max=5.0))
+        touch_bonus = self.touch_bonus * touching * gentle_force
+        reward_dict["touch_bonus"] = touch_bonus
+
+        # Encourage gripper open while approaching and close when near; penalize premature closing.
+        gripper_idx = self.jnt_names.index("gripper")
+        gripper_ang = dof_ang[:, :, gripper_idx]  # (num_robots, batch)
+        gripper_norm = torch.clamp(
+            (gripper_ang - self.joint_lower[gripper_idx])
+            / (self.joint_upper[gripper_idx] - self.joint_lower[gripper_idx] + 1e-6),
+            0.0,
+            1.0,
+        )
+        assigned_gripper_norm = gripper_norm.permute(1, 0).gather(1, assigned_robot_idx.unsqueeze(1)).squeeze(1)
+        far_mask = assigned_dist > (2 * self.pick_threshold)
+        open_reward = 2.0 * torch.where(far_mask, assigned_gripper_norm, torch.zeros_like(assigned_gripper_norm))
+        close_reward = 4.0 * torch.where(
+            assigned_dist < self.pick_threshold, 1.0 - assigned_gripper_norm, torch.zeros_like(assigned_gripper_norm)
+        )
+        premature_close_penalty = -2.0 * torch.where(
+            far_mask, 1.0 - assigned_gripper_norm, torch.zeros_like(assigned_gripper_norm)
+        )
+        reward_dict["gripper_open_reward"] = open_reward
+        reward_dict["gripper_close_reward"] = close_reward
+        reward_dict["gripper_premature_close_penalty"] = premature_close_penalty
+
+        # Bonus for lifting the active piece (encourages carrying after grasp).
+        lift_height = torch.clamp(active_piece_pos[:, 2] - (self.print_bed_top_z + 0.01), min=0.0)
+        lift_bonus = 3.0 * lift_height
+        reward_dict["lift_bonus"] = lift_bonus
 
         piece_completed = (pos_error_norm <= self.place_threshold) & (rot_error_norm <= self.rotation_threshold)
         piece_completed_batch = piece_completed.permute(1, 0)
@@ -568,7 +620,7 @@ class MovePiecesEnv(gym.Env):
             contact_force_entries.append(force_magnitudes.sum(dim=1))
         contact_force_sum = torch.stack(contact_force_entries, dim=0).sum(dim=0)
         reward_dict["contact_force_sum"] = contact_force_sum.detach().mean().cpu()
-        reward_dict["contact_force_sum_reward"] = -0.1 * torch.nan_to_num(contact_force_sum, nan=0.0)
+        reward_dict["contact_force_sum_reward"] = -0.1 * torch.nan_to_num(contact_force_sum, nan=0.0).clamp(-100.0, 0.0)
 
         links_contact_entries = []
         for robot in self.robots:
@@ -577,20 +629,20 @@ class MovePiecesEnv(gym.Env):
             links_contact_entries.append(torch.mean(link_force_magnitudes, dim=1))
         links_contact_force = torch.stack(links_contact_entries, dim=0).mean(dim=0)
         reward_dict["links_force_sum"] = links_contact_force.detach().mean().cpu()
-        reward_dict["links_force_sum_reward"] = -1.2 * torch.nan_to_num(links_contact_force, nan=0.0)
+        reward_dict["links_force_sum_reward"] = -1.2 * torch.nan_to_num(links_contact_force, nan=0.0).clamp(-100.0, 0.0)
 
         reward_dict["gripper_velocity"] = gripper_vel_mag.detach().mean().cpu()
-        reward_dict["gripper_velocity_reward"] = -0.1 * torch.nan_to_num(gripper_vel_mag, nan=0.0).sum(dim=0)
+        reward_dict["gripper_velocity_reward"] = -0.1 * torch.nan_to_num(gripper_vel_mag, nan=0.0).sum(dim=0).clamp(-100.0, 0.0)
 
         reward_dict["gripper_angular_velocity"] = gripper_ang_mag.detach().mean().cpu()
-        reward_dict["gripper_angular_velocity_reward"] = -0.01 * torch.nan_to_num(gripper_ang_mag, nan=0.0).sum(dim=0)
+        reward_dict["gripper_angular_velocity_reward"] = -0.01 * torch.nan_to_num(gripper_ang_mag, nan=0.0).sum(dim=0).clamp(-100.0, 0.0)
 
         joint_velocity = self._stack_dof_states("get_dofs_velocity")
         joint_velocity = joint_velocity.permute(1, 0, 2).reshape(self.batch_size, -1)
         joint_velocity = torch.linalg.vector_norm(joint_velocity, dim=-1)
         joint_velocity_sq = joint_velocity**2
         reward_dict["joint_velocity_sq"] = joint_velocity_sq.detach().mean().cpu()
-        reward_dict["joint_velocity_sq_reward"] = -0.0009 * torch.nan_to_num(joint_velocity_sq, nan=0.0)
+        reward_dict["joint_velocity_sq_reward"] = -0.0009 * torch.nan_to_num(joint_velocity_sq, nan=0.0).clamp(-100.0, 0.0)
 
         forearm_pos = self._stack_link_states(self.forearm_link_name, "get_pos")
         forearm_pos_batch = forearm_pos.permute(1, 0, 2)
@@ -598,6 +650,13 @@ class MovePiecesEnv(gym.Env):
         forearm_height = best_forearm_pos[:, 2]
         reward_dict["forearm_height"] = forearm_height.detach().mean().cpu()
         reward_dict["forearm_height_reward"] = 0.02 * forearm_height
+
+        # Clamp/clean all reward tensors to keep them finite.
+        for k, v in list(reward_dict.items()):
+            if isinstance(v, torch.Tensor):
+                v = torch.nan_to_num(v, nan=0.0, posinf=1e4, neginf=-1e4)
+                v = torch.clamp(v, min=-1e4, max=1e4)
+                reward_dict[k] = v
 
         reward = torch.zeros(self.batch_size, device=self.device)
         for key in list(reward_dict.keys()):
