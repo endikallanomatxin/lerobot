@@ -246,6 +246,10 @@ class MovePiecesEnv(gym.Env):
         self.joint_upper = torch.tensor(upper, device=self.device, dtype=torch.float32)
         self.gripper_link_name = "gripper_tip"
         self.forearm_link_name = "lower_arm"
+        self.zero_action_angles = {
+            "left": self._build_zero_angle_pose(side="left"),
+            "right": self._build_zero_angle_pose(side="right"),
+        }
         self._piece_initial_pose = torch.tensor(
             [(*spec.initial.pos, *spec.initial.quat) for spec in self.piece_specs],
             dtype=torch.float32,
@@ -319,8 +323,10 @@ class MovePiecesEnv(gym.Env):
         super().reset(seed=seed)
         ctrl_pos = torch.zeros(self.dofs_per_robot)
         tiled_ctrl = torch.tile(ctrl_pos, (self.batch_size, 1))
-        for robot, dof_idx in zip(self.robots, self.dofs_idx):
-            robot.control_dofs_position(tiled_ctrl, dof_idx)
+        for side, robot, dof_idx in zip(self.sides, self.robots, self.dofs_idx):
+            zero_angles = self.zero_action_angles[side].to(device=self.device)
+            tiled_home = torch.tile(zero_angles, (self.batch_size, 1))
+            robot.control_dofs_position(tiled_home, dof_idx)
 
         self._reset_pieces()
         self.active_piece_idx.zero_()
@@ -548,7 +554,8 @@ class MovePiecesEnv(gym.Env):
         actions = self._convert_actions(actions)
         for idx, robot in enumerate(self.robots):
             robot_actions = actions[:, idx, :]
-            angles = actions_to_angles(robot_actions, self.joint_lower, self.joint_upper)
+            zero_angles = self.zero_action_angles[self.sides[idx]]
+            angles = actions_to_angles(robot_actions, self.joint_lower, self.joint_upper, zero_angles=zero_angles)
             robot.control_dofs_position(angles, self.dofs_idx[idx])
         self.scene.step()
         self.current_step += 1
@@ -913,10 +920,13 @@ class MovePiecesEnv(gym.Env):
         if actions.ndim == 1:
             actions = actions.unsqueeze(0)
 
-        if actions.shape[-1] != self.act_dim:
+        # Acepta tanto (batch, act_dim) como (batch, num_robots, dofs_per_robot).
+        if actions.ndim == 3 and actions.shape[1:] == (self.num_robots, self.dofs_per_robot):
+            pass
+        elif actions.shape[-1] != self.act_dim:
             raise ValueError(f"Expected action dim {self.act_dim}, got {actions.shape}")
-
-        actions = actions.reshape(-1, self.num_robots, self.dofs_per_robot)
+        else:
+            actions = actions.reshape(-1, self.num_robots, self.dofs_per_robot)
         treat_as_normalized = torch.max(torch.abs(actions)) <= 1.05
         normalized = torch.empty_like(actions, dtype=torch.float32)
         for j, joint in enumerate(self.jnt_names):
@@ -931,12 +941,39 @@ class MovePiecesEnv(gym.Env):
 
         return normalized
 
+    def _build_zero_angle_pose(self, side: str) -> torch.Tensor:
+        """
+        Define a neutral pose so que acción=0 mantenga cada brazo en su lado.
+        """
+        # Valores escogidos para mantener los brazos abiertos y alejados del centro.
+        if side == "left":
+            base = torch.tensor(
+                [1.25, -0.4, 1.25, -0.6, 0.25, 0.4],  # más pan y flex para dejar hueco en el centro
+                dtype=torch.float32,
+                device=self.device,
+            )
+        else:  # right (pose espejada)
+            base = torch.tensor(
+                [-1.25, -0.4, -1.25, -0.6, -0.25, 0.4],
+                dtype=torch.float32,
+                device=self.device,
+            )
 
-def actions_to_angles(actions: torch.Tensor, joint_lower: torch.Tensor, joint_upper: torch.Tensor):
+        base = torch.max(base, self.joint_lower)
+        base = torch.min(base, self.joint_upper)
+        return base
+
+
+def actions_to_angles(actions: torch.Tensor, joint_lower: torch.Tensor, joint_upper: torch.Tensor, zero_angles: torch.Tensor | None = None):
     normalized = torch.clamp(actions, -1.0, 1.0).to(dtype=torch.float32)
     lower = joint_lower.to(device=normalized.device, dtype=normalized.dtype)
     upper = joint_upper.to(device=normalized.device, dtype=normalized.dtype)
-    return lower + 0.5 * (normalized + 1.0) * (upper - lower)
+    if zero_angles is None:
+        return lower + 0.5 * (normalized + 1.0) * (upper - lower)
+    span = 0.5 * (upper - lower)
+    zero = zero_angles.to(device=normalized.device, dtype=normalized.dtype)
+    angles = zero + normalized * span
+    return torch.clamp(angles, lower, upper)
 
 
 Environment = MovePiecesEnv
