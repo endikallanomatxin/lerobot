@@ -66,6 +66,13 @@ class MovePiecesEnv(gym.Env):
         # Keep debug spheres off by default; enable by setting show_debug_markers=True.
         self.debug_env_count = min(4, batch_size) if show_debug_markers else 0
         self.env_colors = self._generate_pair_colors(self.debug_env_count)
+        self.rng = torch.Generator(device=self.device)
+        # Exploration helpers to avoid idle symmetry.
+        self.action_noise_std = 0.35
+        self.action_bias_std = 0.25
+        self.action_gain_base = 1.2
+        self.action_gain_jitter = 0.25
+        self.min_action_magnitude = 0.25
 
         assets_root = Path(__file__).resolve().parent
         robot_path = assets_root / "assets" / "SO101" / "so101_new_calib.xml"
@@ -244,6 +251,7 @@ class MovePiecesEnv(gym.Env):
         upper = [joint_limits[name][1] for name in self.jnt_names]
         self.joint_lower = torch.tensor(lower, device=self.device, dtype=torch.float32)
         self.joint_upper = torch.tensor(upper, device=self.device, dtype=torch.float32)
+        self.joint_span = self.joint_upper - self.joint_lower
         self.gripper_link_name = "gripper_tip"
         self.forearm_link_name = "lower_arm"
         self.zero_action_angles = {
@@ -262,6 +270,9 @@ class MovePiecesEnv(gym.Env):
         )
         self.piece_target_pos = self._piece_target_pose[:, :3]
         self.piece_target_rotvec = self._quat_to_rotvec(self._piece_target_pose[:, 3:])
+        # Defaults for per-episode action shaping.
+        self._action_bias = torch.zeros((self.num_robots, self.dofs_per_robot), device=self.device)
+        self._action_gain = torch.ones((self.num_robots, 1), device=self.device) * self.action_gain_base
 
         self.current_step = 0
 
@@ -308,25 +319,39 @@ class MovePiecesEnv(gym.Env):
         self.pick_threshold = 0.025
         self.place_threshold = 0.02
         self.rotation_threshold = 0.05
-        self.w_pos = 4.0
-        self.w_rot = 1.5
-        self.w_phase1 = 1.0
-        self.w_phase2 = 2.0
-        self.w_phase3_pos = 3.0
-        self.w_phase3_rot = 1.5
-        self.completion_bonus = 5.0
+        # Heavier rewards for approaching and grasping/moving.
+        self.w_pos = 8.0
+        self.w_rot = 3.5
+        self.w_phase1 = 6.0    # encourage approaching the assigned piece
+        self.w_phase2 = 6.0    # encourage moving toward target
+        self.w_phase3_pos = 8.0
+        self.w_phase3_rot = 4.0
+        # Extra bonus for completing a piece (grasp + place).
+        self.completion_bonus = 12.0
 
         if self.record:
             self.cam.start_recording()
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         super().reset(seed=seed)
-        ctrl_pos = torch.zeros(self.dofs_per_robot)
-        tiled_ctrl = torch.tile(ctrl_pos, (self.batch_size, 1))
-        for side, robot, dof_idx in zip(self.sides, self.robots, self.dofs_idx):
-            zero_angles = self.zero_action_angles[side].to(device=self.device)
-            tiled_home = torch.tile(zero_angles, (self.batch_size, 1))
-            robot.control_dofs_position(tiled_home, dof_idx)
+        if seed is not None:
+            self.rng.manual_seed(seed)
+        # Sample diverse starting joint poses across full limits to avoid neutral bias.
+        rand_joints = torch.rand(
+            (self.num_robots, self.batch_size, self.dofs_per_robot), device=self.device, generator=self.rng
+        )
+        joint_init = self.joint_lower + rand_joints * self.joint_span
+        for idx, (side, robot, dof_idx) in enumerate(zip(self.sides, self.robots, self.dofs_idx)):
+            robot.control_dofs_position(joint_init[idx], dof_idx)
+
+        # Per-episode bias and gain per robot to break symmetry even with similar actions.
+        self._action_bias = torch.randn(
+            (self.num_robots, self.dofs_per_robot), device=self.device, generator=self.rng
+        ) * self.action_bias_std
+        self._action_gain = (
+            self.action_gain_base
+            + self.action_gain_jitter * torch.randn((self.num_robots, 1), device=self.device, generator=self.rng)
+        )
 
         self._reset_pieces()
         self.active_piece_idx.zero_()
@@ -432,6 +457,7 @@ class MovePiecesEnv(gym.Env):
         gripper_vel_mag = torch.linalg.vector_norm(gripper_vel, dim=-1)
         gripper_ang_vel = self._stack_link_states(self.gripper_link_name, "get_ang")
         gripper_ang_mag = torch.linalg.vector_norm(gripper_ang_vel, dim=-1)
+        gripper_height = gripper_pos[..., 2]
 
         piece_pos = self._stack_piece_states("get_pos")
         piece_quat = self._stack_piece_states("get_quat")
@@ -462,14 +488,16 @@ class MovePiecesEnv(gym.Env):
         gripper_pos_batch = gripper_pos.permute(1, 0, 2)
         gripper_to_piece = gripper_pos_batch - active_piece_pos.unsqueeze(1)
         gripper_distances = torch.linalg.vector_norm(gripper_to_piece, dim=-1)
-        closest_dist, closest_robot_idx = torch.min(gripper_distances, dim=1)
-        needs_pick = closest_dist > self.pick_threshold
+        # Assign robots: left (idx 0) handles pieces 0/1; right (idx 1) handles piece 2.
+        assigned_robot_idx = torch.where(self.active_piece_idx <= 1, torch.zeros_like(self.active_piece_idx), torch.ones_like(self.active_piece_idx))
+        assigned_dist = gripper_distances[batch_indices, assigned_robot_idx]
+        needs_pick = assigned_dist > self.pick_threshold
         far_from_target = active_pos_error > self.place_threshold
 
         phase1_reward = torch.where(
             needs_pick,
-            -self.w_phase1 * closest_dist,
-            torch.zeros_like(closest_dist),
+            -self.w_phase1 * assigned_dist,
+            torch.zeros_like(assigned_dist),
         )
         phase2_mask = (~needs_pick) & far_from_target
         phase2_reward = torch.where(
@@ -484,10 +512,23 @@ class MovePiecesEnv(gym.Env):
             torch.zeros_like(active_pos_error),
         )
 
-        reward_dict["phase1_min_gripper_piece"] = closest_dist.detach().mean().cpu()
+        reward_dict["phase1_assigned_gripper_piece"] = assigned_dist.detach().mean().cpu()
         reward_dict["phase1_reward"] = phase1_reward
         reward_dict["phase2_reward"] = phase2_reward
         reward_dict["phase3_reward"] = phase3_reward
+
+        # Penalize touching the table with the gripper (z below bed top + small clearance).
+        table_clearance = self.print_bed_top_z + 0.01
+        gripper_table_penalty = torch.clamp(table_clearance - gripper_height, min=0.0)
+        table_penalty = -3.0 * gripper_table_penalty.mean(dim=0)
+        reward_dict["table_touch_penalty"] = table_penalty
+
+        # Penalize pieces falling off the table (z below bed top - margin).
+        drop_margin = 0.01
+        piece_height = piece_pos[..., 2]
+        drop_penalty_mask = piece_height < (self.print_bed_top_z - drop_margin)
+        drop_penalty = -10.0 * drop_penalty_mask.float().sum(dim=0)
+        reward_dict["piece_drop_penalty"] = drop_penalty
 
         piece_completed = (pos_error_norm <= self.place_threshold) & (rot_error_norm <= self.rotation_threshold)
         piece_completed_batch = piece_completed.permute(1, 0)
@@ -536,7 +577,7 @@ class MovePiecesEnv(gym.Env):
 
         forearm_pos = self._stack_link_states(self.forearm_link_name, "get_pos")
         forearm_pos_batch = forearm_pos.permute(1, 0, 2)
-        best_forearm_pos = forearm_pos_batch[batch_indices, closest_robot_idx]
+        best_forearm_pos = forearm_pos_batch[batch_indices, assigned_robot_idx]
         forearm_height = best_forearm_pos[:, 2]
         reward_dict["forearm_height"] = forearm_height.detach().mean().cpu()
         reward_dict["forearm_height_reward"] = 0.02 * forearm_height
@@ -927,6 +968,20 @@ class MovePiecesEnv(gym.Env):
             raise ValueError(f"Expected action dim {self.act_dim}, got {actions.shape}")
         else:
             actions = actions.reshape(-1, self.num_robots, self.dofs_per_robot)
+        # Apply per-episode per-robot gain/bias and exploration noise to avoid idle.
+        actions = actions * self._action_gain.unsqueeze(0) + self._action_bias.unsqueeze(0)
+        if self.action_noise_std > 0:
+            actions = actions + self.action_noise_std * torch.randn(
+                actions.shape, device=self.device, generator=self.rng
+            )
+        # If action magnitude is too low, kick it with extra noise to prevent stagnation.
+        mean_abs = actions.abs().mean(dim=-1, keepdim=True)
+        low_mask = mean_abs < self.min_action_magnitude
+        if low_mask.any():
+            actions = actions + low_mask * (
+                self.min_action_magnitude * torch.randn(actions.shape, device=self.device, generator=self.rng)
+            )
+        actions = torch.clamp(actions, -1.0, 1.0)
         treat_as_normalized = torch.max(torch.abs(actions)) <= 1.05
         normalized = torch.empty_like(actions, dtype=torch.float32)
         for j, joint in enumerate(self.jnt_names):
