@@ -112,15 +112,15 @@ class MovePiecesEnv(gym.Env):
                 "res": (640, 480),
                 "pos": (0, 0, 0),  # Se sobreescribe, así que da igual
                     "lookat": (0, 0, 0),
-                    "fov": 120,
+                    "fov": 240,
                     "near": 0.0001,
                     "follow": {
                         "side": "right",
                         "link": "gripper_tip",
                         # Mirrored mount on the right gripper.
-                        "offset": (0.05, -0.04, -0.18),
-                        "forward": (0.00, -0.02, 0.24),
-                        "up": (0.0, -1.0, 0.0),
+                        "offset": (0.0, -0.2, 0.0),
+                        "forward": (0.2, 0.2, 0.0),
+                        "up": (0.0, 1.0, 0.0),
                         "orbit_deg": 0.0,
                     },
                 },
@@ -172,38 +172,6 @@ class MovePiecesEnv(gym.Env):
                 layout_override = json.load(f)
 
         self.piece_specs = self._build_piece_specs(robot_path.parent, layout_override)
-
-        # Decorative meshes (no collision) loaded from assets/custom.
-        custom_dir = assets_root / "assets" / "custom"
-        decorative_layout = [
-            # Pinza: trasladada a (1, 1) en XY, rotada +90° en X
-            {"file": "pinza.glb", "pos": (1.0, 1.0, 0.02), "quat": (0.7071, 0.7071, 0.0, 0.0)},
-            # Brazo: trasladado a (1, 1) en XY, rotado +90° en Y
-            {"file": "brazo.glb", "pos": (1.0, 1.0, 0.02), "quat": (0.7071, 0.0, 0.7071, 0.0)},
-            # Cuadrado: trasladado a (1, 1) en XY, rotado +90° en Z
-            {"file": "cuadrado.glb", "pos": (1.0, 1.0, 0.02), "quat": (0.7071, 0.0, 0.0, 0.7071)},
-        ]
-        self.decorative_entities = []
-        for deco in decorative_layout:
-            path = custom_dir / deco["file"]
-            if not path.exists():
-                print(f"[decorative] missing asset {path}, skipping")
-                continue
-            self.decorative_entities.append(
-                self.scene.add_entity(
-                    gs.morphs.Mesh(
-                        file=str(path),
-                        pos=tuple(deco["pos"]),
-                        quat=tuple(deco["quat"]),
-                        fixed=True,
-                        collision=False,
-                        visualization=True,
-                        convexify=False,
-                        parse_glb_with_trimesh=True,  # keep baked vertex colors from GLB
-                    )
-                )
-            )
-
         self.piece_entities = [
             self.scene.add_entity(
                 gs.morphs.Mesh(
