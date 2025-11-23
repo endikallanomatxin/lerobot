@@ -57,12 +57,14 @@ class MovePiecesEnv(gym.Env):
         camera_setups: dict | None = None,
         piece_layout: list[dict] | None = None,
         piece_layout_file: str | Path | None = None,
+        show_debug_markers: bool = False,
     ):
         self.device = torch.device(device)
         self.batch_size = batch_size
         self.max_steps = max_steps
         self.record = record
-        self.debug_env_count = min(4, batch_size)
+        # Keep debug spheres off by default; enable by setting show_debug_markers=True.
+        self.debug_env_count = min(4, batch_size) if show_debug_markers else 0
         self.env_colors = self._generate_pair_colors(self.debug_env_count)
 
         assets_root = Path(__file__).resolve().parent
