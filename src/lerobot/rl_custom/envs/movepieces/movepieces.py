@@ -112,14 +112,14 @@ class MovePiecesEnv(gym.Env):
                 "res": (640, 480),
                 "pos": (0, 0, 0),  # Se sobreescribe, así que da igual
                     "lookat": (0, 0, 0),
-                    "fov": 240,
+                    "fov": 120,
                     "near": 0.0001,
                     "follow": {
                         "side": "right",
                         "link": "gripper_tip",
                         # Mirrored mount on the right gripper.
-                        "offset": (0.0, -0.2, 0.0),
-                        "forward": (0.2, 0.2, 0.0),
+                        "offset": (0.0, 0.2, 0.0),
+                        "forward": (0.2,-0.2, 0.0),
                         "up": (0.0, 1.0, 0.0),
                         "orbit_deg": 0.0,
                     },
