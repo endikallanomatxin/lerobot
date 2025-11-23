@@ -172,6 +172,34 @@ class MovePiecesEnv(gym.Env):
                 layout_override = json.load(f)
 
         self.piece_specs = self._build_piece_specs(robot_path.parent, layout_override)
+
+        # Decorative meshes (no collision) loaded from assets/custom.
+        custom_dir = assets_root / "assets" / "custom"
+        decorative_layout = [
+            {"file": "pinza.stl", "pos": self.piece_specs[0].initial.pos, "quat": self.piece_specs[0].initial.quat},
+            {"file": "brazo.stl", "pos": self.piece_specs[1].initial.pos, "quat": self.piece_specs[1].initial.quat},
+            {"file": "cuadrado.stl", "pos": self.piece_specs[2].initial.pos, "quat": self.piece_specs[2].initial.quat},
+        ]
+        self.decorative_entities = []
+        for deco in decorative_layout:
+            path = custom_dir / deco["file"]
+            if not path.exists():
+                print(f"[decorative] missing asset {path}, skipping")
+                continue
+            self.decorative_entities.append(
+                self.scene.add_entity(
+                    gs.morphs.Mesh(
+                        file=str(path),
+                        pos=tuple(deco["pos"]),
+                        quat=tuple(deco["quat"]),
+                        fixed=True,
+                        collision=False,
+                        visualization=True,
+                        convexify=False,
+                    )
+                )
+            )
+
         self.piece_entities = [
             self.scene.add_entity(
                 gs.morphs.Mesh(
