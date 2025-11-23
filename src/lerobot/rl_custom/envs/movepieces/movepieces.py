@@ -124,7 +124,7 @@ class MovePiecesEnv(gym.Env):
                         "orbit_deg": 0.0,
                     },
                 },
-            "overhead": {"res": (640, 480), "pos": (0.0, -0.10, 0.75), "lookat": (0.0, -0.10, 0.05), "fov": 60},
+            "overhead": {"res": (640, 480), "pos": (0.0, 0.3, 0.55), "lookat": (0.0, -1, -1.73), "fov": 60},
         }
         cam_cfg = default_cam_setups if camera_setups is None else camera_setups
         self.cameras = {
