@@ -126,7 +126,7 @@ class MovePiecesEnv(gym.Env):
                         "orbit_deg": 0.0,
                     },
                 },
-            "overhead": {"res": (640, 480), "pos": (0.0, 0.3, 0.55), "lookat": (0.0, -1, -1.73), "fov": 60},
+            "overhead": {"res": (640, 480), "pos": (0.0, 0.3, 0.55), "lookat": (0.0, -1, -1.73), "fov": 50},
         }
         cam_cfg = default_cam_setups if camera_setups is None else camera_setups
         self.cameras = {
@@ -404,8 +404,12 @@ class MovePiecesEnv(gym.Env):
                     img_np = img.detach().cpu().numpy()
                 else:
                     img_np = np.asarray(img)
-                if img_np.ndim == 4:
-                    img_np = img_np[0]
+                # Ensure images are batched to match env batch size. Cameras may render only env 0.
+                if img_np.ndim == 3:  # HWC
+                    img_np = img_np[None, ...]
+                if img_np.shape[0] != self.batch_size:
+                    # Repeat first env's view to fill the batch (avoids shape mismatch downstream).
+                    img_np = np.repeat(img_np[:1], self.batch_size, axis=0)
                 if img_np.dtype != np.uint8:
                     img_np = np.clip(img_np, 0, 255).astype(np.uint8)
                 pixels[name] = img_np
