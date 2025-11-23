@@ -172,6 +172,36 @@ class MovePiecesEnv(gym.Env):
                 layout_override = json.load(f)
 
         self.piece_specs = self._build_piece_specs(robot_path.parent, layout_override)
+        # Decorative meshes (no collision) loaded from assets/custom.
+        custom_dir = assets_root / "assets" / "custom"
+        decorative_layout = [
+            # Pinza: trasladada a (1, 1) en XY, rotada +90° en X
+            {"file": "pinza.glb", "pos": (0.125, -0.1, self.print_bed_top_z), "quat": (0.683013, 0.183013, -0.683013, 0.183013)},
+            # Brazo: trasladado a (1, 1) en XY, rotado +90° en Y
+            {"file": "brazo.glb", "pos": (-0.135, -0.115, self.print_bed_top_z), "quat": (0.612372, 0.612372, 0.353553, 0.353553)},
+            # Cuadrado: trasladado a (1, 1) en XY, rotado +90° en Z
+            {"file": "cuadrado.glb", "pos": (-0.03, -0.12, self.print_bed_top_z), "quat": (0.5, 0.5, -0.5, 0.5)},
+        ]
+        self.decorative_entities = []
+        for deco in decorative_layout:
+            path = custom_dir / deco["file"]
+            if not path.exists():
+                print(f"[decorative] missing asset {path}, skipping")
+                continue
+            self.decorative_entities.append(
+                self.scene.add_entity(
+                    gs.morphs.Mesh(
+                        file=str(path),
+                        pos=tuple(deco["pos"]),
+                        quat=tuple(deco["quat"]),
+                        fixed=True,
+                        collision=False,
+                        visualization=True,
+                        convexify=False,
+                        parse_glb_with_trimesh=True,  # keep baked vertex colors from GLB
+                    )
+                )
+            )
         self.piece_entities = [
             self.scene.add_entity(
                 gs.morphs.Mesh(
