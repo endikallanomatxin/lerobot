@@ -1,14 +1,11 @@
-# Important commands for running bimanual SO101 experiments
-
-
-## Configuración de los motores
+## Requirements
 
 ```sh
-lerobot-setup-motors \
-  --teleop.type=so101_leader \
-  --teleop.port=/dev/ttyACM3
+pip install "lerobot[feetech]" \
+  lerobot-robot-bi-so101-follower \
+  lerobot-robot-bi-so101-leader \
+  lerobot-teleoperator-bi-so101-leader
 ```
-
 
 ## Calibración de los robots
 
@@ -89,6 +86,7 @@ python -m lerobot.rl_custom.train_genesis \
     --batch_size 16 \
     --max_steps 300 \
     --steps 200 \
+    --device cuda \
     --policy_path outputs/train/act_bimanual-so101-demo-30/checkpoints/002000/pretrained_model/
 ```
 
